@@ -1,0 +1,123 @@
+"""Request bodies (Pydantic v2). Secrets are SecretStr so they never end up in logs or reprs."""
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class LoginIn(StrictModel):
+    password: SecretStr
+
+
+class PasswordChangeIn(StrictModel):
+    current: SecretStr
+    new: SecretStr
+
+
+class AppSettingsIn(StrictModel):
+    claude_api_key: SecretStr | None = None  # write-only; empty string removes it
+    claude_model: str | None = Field(None, max_length=80)
+    ui_refresh_seconds: int | None = Field(None, ge=2, le=600)
+
+
+class AccountCreateIn(StrictModel):
+    name: str = Field(min_length=1, max_length=80)
+    slug: str = Field(min_length=3, max_length=40)
+    color: str | None = None
+
+
+class AccountUpdateIn(StrictModel):
+    name: str | None = Field(None, max_length=80)
+    color: str | None = None
+    settings: dict[str, Any] | None = None
+    automation_paused: bool | None = None
+
+
+class TelegramTokenIn(StrictModel):
+    token: SecretStr
+
+
+class BotConnectionIn(StrictModel):
+    base_url: str = Field(max_length=300)
+    username: str = Field("", max_length=64)
+    api_key: SecretStr | None = None  # omit to keep the stored key
+
+
+class SyncIn(StrictModel):
+    kind: Literal["fast", "stats", "bot", "all"] = "all"
+
+
+class AdActionIn(StrictModel):
+    action: Literal["pause", "resume", "withdraw", "topup"]
+    amount: float | None = Field(None, ge=0)
+
+
+class AdEditIn(StrictModel):
+    text: str | None = Field(None, max_length=400)
+    tag_id: int | None = None
+    variant_id: int | None = None
+    note: str | None = Field(None, max_length=500)
+    clear_tag: bool = False
+
+
+class AdCreateIn(StrictModel):
+    kind: Literal["channel", "bot"]
+    username: str = Field(max_length=40)
+    text: str = Field(max_length=400)
+    cpm: float = Field(gt=0)
+    budget: float = Field(gt=0)
+    title: str | None = Field(None, max_length=120)
+    variant_id: int | None = None
+    tag_id: int | None = None
+    show_userpic: bool = False
+    note: str | None = Field(None, max_length=500)
+    replace_ad_id: int | None = None
+
+
+class ApproveKindIn(StrictModel):
+    kind: Literal["stop", "withdraw", "topup"]
+
+
+class TextIn(StrictModel):
+    name: str = Field(max_length=80)
+    text: str = Field(max_length=400)
+
+
+class TextUpdateIn(StrictModel):
+    name: str | None = Field(None, max_length=80)
+    text: str | None = Field(None, max_length=400)
+    active: bool | None = None
+
+
+class TextAnalyzeIn(StrictModel):
+    goal: str = Field("", max_length=500)
+
+
+class TagIn(StrictModel):
+    name: str = Field(max_length=80)
+    referrer_id: str = Field(max_length=32)
+    start_code: str = Field("", max_length=64)
+    note: str = Field("", max_length=500)
+
+
+class TagUpdateIn(StrictModel):
+    name: str | None = Field(None, max_length=80)
+    referrer_id: str | None = Field(None, max_length=32)
+    start_code: str | None = Field(None, max_length=64)
+    note: str | None = Field(None, max_length=500)
+
+
+class ReferrerLookupIn(StrictModel):
+    referrer_id: str = Field(max_length=32)
+
+
+class AnalysisIn(StrictModel):
+    question: str = Field("", max_length=2000)
+
+
+class KillIn(StrictModel):
+    confirm: str

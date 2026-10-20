@@ -1,5 +1,8 @@
 {$DOMAIN} {
-	encode gzip
-	header Strict-Transport-Security "max-age=31536000"
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
 	reverse_proxy app:8000
 }

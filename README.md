@@ -1,160 +1,163 @@
-# مدیریت تبلیغات تلگرام سایکونت
+<div dir="rtl">
+
+# Telegram Ads Manager
 
 [![CI](https://github.com/danialrahimian/telegram-ads-/actions/workflows/ci.yml/badge.svg)](https://github.com/danialrahimian/telegram-ads-/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![shadcn/ui](https://img.shields.io/badge/UI-shadcn%2Fui-000000)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-پنل وب برای مدیریت حساب Telegram Ads. روی سرور خودتان نصب می‌شود.
+**پنل خودمیزبان برای مدیریت چند حساب Telegram Ads، ردیابی فروش هر آگهی از طریق API ربات فروش، و تحلیل و بازنویسی متن‌ها با Claude.**
 
-- همه‌ی آگهی‌ها و آمار روزانه را هر ساعت همگام می‌کند.
-- با قاعده‌های قابل تنظیم پیشنهاد می‌دهد: بودجه‌ی خوابیده را پس بگیرد، آگهی پرهزینه را متوقف کند، آگهی خوب را شارژ کند، یا متن خسته را عوض کند.
-- بعد از تأیید شما، پیشنهاد را با سقف‌های ایمنی اجرا می‌کند.
-- آگهی جدید را با لینک ردیابی خرید و تست A/B متن می‌سازد.
-- خروجی آماده برای تحلیل با Claude می‌دهد.
+هر حساب تبلیغاتی (مثلاً یکی برای «سایکونت» و یکی برای «دروازه آزادی») مسیر، داشبورد، اتصال‌ها، قوانین و تحلیل جداگانه‌ی خودش را دارد. پنل فارسی و راست‌به‌چپ است و روی موبایل هم کامل کار می‌کند.
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.webp" alt="داشبورد یک حساب" width="78%">
+  <img src="docs/screenshots/mobile-dashboard.webp" alt="داشبورد روی موبایل" width="19%">
+</p>
+
+<sub>تصویرها از داده‌ی آزمایشی (mock) گرفته شده‌اند.</sub>
+
+## امکانات
+
+| | |
+|---|---|
+| 🧭 **چند حساب، کاملاً جدا** | هر حساب Telegram Ads با ربات خودش در مسیر `/accounts/<slug>` داشبورد، آگهی‌ها، پیشنهادها، متن‌ها و تحلیل جدا دارد. |
+| 🔌 **اتصال از داخل داشبورد** | توکن Telegram Ads و آدرس + کلید API هر ربات در صفحه‌ی «اتصال و تنظیمات» همان حساب وارد می‌شود و سلامت هر اتصال جدا بررسی می‌شود. کلیدها رمزنگاری‌شده (Fernet) ذخیره می‌شوند. |
+| 🔄 **همگام‌سازی دوره‌ای قابل تنظیم** | آگهی‌ها و موجودی (پیش‌فرض هر ۳۰ ثانیه)، آمار روزانه (۱۰ دقیقه) و ربات فروش (۲ دقیقه) — برای هر حساب جدا قابل تغییر؛ داشبورد هم هر چند ثانیه خودش تازه می‌شود. |
+| 🏷️ **ردیابی فروش هر آگهی (رفرال)** | هر گروه آگهی با لینک دعوت یک حساب معرف جدا در ربات ساخته می‌شود (`?start=`). کاربران دعوت‌شده و خریدهایشان از API ربات خوانده می‌شوند و **هزینه‌ی هر مشتری** برای هر آگهی و برچسب حساب می‌شود. |
+| ✍️ **متن‌ها با Claude** | کتابخانه‌ی متن با ویرایش دستی، تحلیل Claude (امتیاز، نقاط قوت، مشکل‌ها) و سه بازنویسی که قبل از ذخیره قابل ویرایش‌اند؛ عملکرد هر متن (CTR، هزینه‌ی هر استارت و مشتری) کنارش دیده می‌شود. |
+| 💡 **پیشنهاد + تأیید** | قوانین قابل تنظیم پیشنهاد می‌دهند: توقف آگهی پرهزینه، پس گرفتن بودجه‌ی بلااستفاده، شارژ آگهی خوب، تازه کردن متن خسته. هیچ پولی بدون تأیید شما جابه‌جا نمی‌شود؛ سقف شارژ روزانه و توقف اضطراری هم هست. |
+| 📊 **تحلیل حساب با Claude** | سؤال بپرسید یا تحلیل کامل بگیرید؛ یا خروجی ZIP (CSV + راهنما) را در claude.ai بارگذاری کنید. |
+| 📱 **رابط shadcn/ui** | React + TypeScript + Tailwind، حالت تیره، تاریخ شمسی، جدول‌ها روی موبایل به کارت تبدیل می‌شوند. |
+
+<p align="center">
+  <img src="docs/screenshots/connections.webp" alt="اتصال Telegram Ads و API ربات با بررسی سلامت" width="49%">
+  <img src="docs/screenshots/texts-claude.webp" alt="تحلیل و بازنویسی متن با Claude" width="49%">
+</p>
 
 ## نصب با یک دستور
 
-روی یک VPS خارج از ایران (Ubuntu یا Debian) با دسترسی root:
+روی یک VPS خارج از ایران (Ubuntu 24.04 پیشنهادی، یا Debian) با دسترسی root. رکورد A دامنه باید به IP سرور اشاره کند و پورت‌های ۸۰ و ۴۴۳ آزاد باشند.
+
+<div dir="ltr">
 
 ```bash
 sudo bash -c "$(curl -fsSL https://github.com/danialrahimian/telegram-ads-/raw/main/install.sh)" @ install
 ```
 
-اسکریپت این کارها را انجام می‌دهد:
-۱. اگر Docker نصب نیست، نصبش می‌کند.
-۲. آخرین نسخه را می‌گیرد.
-۳. سه سؤال می‌پرسد:
-   - **توکن Telegram Ads:** از Telegram Ads ← API ← Copy Token. اسکریپت همان لحظه امتحانش می‌کند.
-   - **رمز پنل:** اگر خالی بگذارید، خودش یک رمز می‌سازد.
-   - **دامنه:** اگر دامنه بدهید، پنل روی HTTPS بالا می‌آید. اگر خالی بگذارید، پنل خصوصی می‌ماند و فقط از راه تونل SSH باز می‌شود.
-۴. برنامه را راه می‌اندازد، دستور مدیریتی `psychonet-ads` را می‌سازد و پشتیبان‌گیری روزانه را تنظیم می‌کند.
+</div>
 
-گزینه‌ها:
+اسکریپت **فقط دو چیز می‌پرسد: دامنه و رمز پنل.** بقیه را خودش انجام می‌دهد: Docker را نصب می‌کند، کلیدهای امنیتی را می‌سازد، HTTPS را با Caddy راه می‌اندازد، دستور `tgads` را می‌سازد و پشتیبان‌گیری روزانه را تنظیم می‌کند.
 
-```bash
-... @ install --domain ads.example.com   # HTTPS روی دامنه (رکورد A دامنه باید به IP سرور اشاره کند)
-... @ install --tunnel                   # بدون دامنه، فقط با تونل SSH
-... @ install --version v1.0.0           # نصب یک نسخه‌ی مشخص
-```
+بعد از نصب:
+1. وارد `https://دامنه‌ی-شما` شوید.
+2. برای هر ربات یک حساب بسازید (مثلاً `psychonet` و `darvaze`).
+3. در «اتصال و تنظیمات» هر حساب:
+   - **توکن Telegram Ads** را از ads.telegram.org ← API بگیرید و وارد کنید. اگر در تلگرام محدودیت IP گذاشته‌اید، IP سرور (که همان‌جا نمایش داده می‌شود) را مجاز کنید.
+   - **آدرس API ربات** (آدرس صفحه‌ی docs هم قبول است)، **نام کاربری ربات** و **کلید API همان ربات** را وارد کنید. کلید باید دسترسی `users` و `statbot` داشته باشد.
+4. در «تنظیمات کلی» کلید Claude را وارد کنید (اختیاری).
 
-نصب بدون سؤال (برای اسکریپت‌ها):
+> توکن‌ها و کلیدها را فقط داخل پنل وارد کنید؛ در چت، تیکت یا گیت‌هاب نفرستید.
 
-```bash
-TG_ADS_TOKEN=... ADMIN_PASSWORD=... DOMAIN=ads.example.com sudo -E bash -c "$(curl -fsSL https://github.com/danialrahimian/telegram-ads-/raw/main/install.sh)" @ install
-```
+**ارتقا از نسخه‌ی ۱ (`psychonet-ads`):** همان دستور نصب را اجرا کنید. دامنه، رمز و توکن قبلی خودکار منتقل می‌شوند، سرویس قدیمی متوقف می‌شود و داده‌ی آن در `/opt/psychonet-ads` باقی می‌ماند.
 
-**بعد از نصب حتماً** در Telegram Ads ← API ← IP address restrictions، آی‌پی سرور را ثبت کنید. اسکریپت آی‌پی را در پایان نصب نشان می‌دهد. این کار باعث می‌شود توکن فقط از همین سرور کار کند.
+نصب بدون سؤال: `DOMAIN=ads.example.com ADMIN_PASSWORD='...' bash install.sh install`
 
-> اگر VPN یا وب‌سرور دیگری روی همین سرور پورت ۸۰ یا ۴۴۳ را گرفته باشد، نصب خودکار به حالت تونل SSH می‌رود.
-> برای HTTPS بهتر است پنل را روی یک VPS کوچک جدا نصب کنید؛ این برای امنیت توکن هم بهتر است.
+## دستور مدیریت `tgads`
 
-### باز کردن پنل در حالت تونل
+<div dir="ltr">
 
-روی کامپیوتر خودتان اجرا کنید:
-
-```bash
-ssh -N -L 8000:127.0.0.1:8000 root@IP_SERVER
-```
-
-بعد `http://localhost:8000` را باز کنید.
-
-## مدیریت روی سرور
-
-| دستور | کار |
+| Command | |
 |---|---|
-| `psychonet-ads status` | نسخه، سلامت و وضعیت سرویس‌ها |
-| `psychonet-ads update` | به‌روزرسانی به آخرین نسخه (قبلش خودکار پشتیبان می‌گیرد) |
-| `psychonet-ads update --version v1.0.0` | رفتن به یک نسخه‌ی مشخص، یا برگشت به نسخه‌ی قبل |
-| `psychonet-ads logs` | دیدن گزارش زنده |
-| `psychonet-ads restart` / `start` / `stop` | راه‌اندازی دوباره، روشن، خاموش |
-| `psychonet-ads backup` | پشتیبان فوری در `/opt/psychonet-ads/backups` (هر شب ساعت ۳:۳۰ هم خودکار انجام می‌شود؛ ۱۴ نسخه‌ی آخر نگه داشته می‌شود) |
-| `psychonet-ads restore <file>` | برگرداندن پایگاه داده از یک پشتیبان |
-| `psychonet-ads edit` | ویرایش تنظیمات (`.env`) و اعمال آن |
-| `psychonet-ads secret` | نمایش کلید ردیابی خرید برای برنامه‌نویس ربات |
-| `psychonet-ads uninstall` | حذف برنامه (داده‌ها را نگه می‌دارد، مگر خودتان بخواهید) |
+| `tgads status` | version, health, containers |
+| `tgads logs [app\|caddy]` | follow logs |
+| `tgads update [--version vX.Y.Z]` | update or roll back (backs up first) |
+| `tgads backup` / `tgads restore <file>` | database + keys backup (daily at 03:30) |
+| `tgads password [new]` | change the panel password |
+| `tgads restart` · `start` · `stop` · `edit` · `uninstall` | |
 
-`stop` فقط پنل و اقدام‌های خودکار را خاموش می‌کند. آگهی‌های روی تلگرام به کارشان ادامه می‌دهند.
+</div>
 
-## نسخه‌ها و انتشار
+## ردیابی فروش هر آگهی چطور کار می‌کند؟
 
-- هر تغییری که روی `main` برود، اول با تست کامل (`tests/run_e2e.sh`) بررسی می‌شود.
-- بعد از قبول شدن تست، ایمیج `ghcr.io/danialrahimian/telegram-ads:main` ساخته می‌شود.
-- **انتشار نسخه‌ی جدید:** دو راه دارید:
-  - در گیت‌هاب: Releases ← Draft a new release ← در Tag بنویسید `v1.1.0` (Create new tag) ← Publish release.
-  - یا از کامپیوتر خودتان:
-    ```bash
-    git tag v1.1.0 && git push origin v1.1.0
-    ```
-  ایمیج‌های `1.1.0` و `latest` ساخته می‌شوند و دستور نصب به متن Release اضافه می‌شود. بعد از آن، `psychonet-ads update` روی سرور همین نسخه را نصب می‌کند.
-- تا وقتی هیچ Release منتشر نشده، نصب و به‌روزرسانی از شاخه‌ی `main` انجام می‌شود.
-- **برگشت به نسخه‌ی قبل:** `psychonet-ads update --version v1.0.0`
-- اگر ایمیج آماده در دسترس نباشد، نصب‌کننده برنامه را از روی کد همان نسخه روی سرور می‌سازد.
-
-## کار روزانه
-
-۱. **پیشنهادها:**
-   - «پس گرفتن بودجه» و «توقف» را معمولاً با «تأیید همه» قبول کنید.
-   - شارژها را یکی‌یکی نگاه کنید.
-   - پیشنهادی که رد کنید، تا یک هفته دوباره پیشنهاد نمی‌شود.
-۲. **نمای کلی:** هزینه‌ی هر استارت و هر مشتری در ۲۸ روز اخیر، و آگهی‌های رد شده یا در حال بررسی.
-۳. **آگهی جدید:** برای جایگاه‌های تازه. متنی که کمتر استفاده شده خودکار انتخاب می‌شود.
-۴. **هفته‌ای یک بار:** در صفحه‌ی «تحلیل با Claude» بسته را دانلود کنید، در گفت‌وگو با Claude آپلود کنید و متن PROMPT.txt را بفرستید.
-
-**قبل از اولین آگهی:** در صفحه‌ی «متن‌ها» جای `[مدت]` را با دوره‌ی واقعی اشتراک پر کنید. تا وقتی جای خالی در متن باشد، آگهی با آن ساخته نمی‌شود.
-
-## ردیابی خرید (برای برنامه‌نویس ربات)
-
-لینک هر آگهی به این شکل است: `t.me/sychonetbot?start=<کد>`. ربات باید:
-۱. وقتی کاربر با `/start <کد>` وارد می‌شود، کد را کنار شناسه‌ی کاربر ذخیره کند.
-۲. در هر خرید، این درخواست را بفرستد:
+<div dir="ltr">
 
 ```
-POST https://ads.example.com/api/conversions
-Authorization: Bearer <CONVERSIONS_SECRET>   (psychonet-ads secret)
-{"code": "c_vaslino_1", "event": "purchase", "amount": 59000, "id": "order-123"}
+Ad (t.me/yourbot?start=ref_tech) ──▶ user starts the bot as a referral of account 9001
+        │                                         │
+        ▼                                         ▼
+Telegram Ads API: spend, views, starts     Bot API: affiliates_users(9001), transactions
+        └──────────────▶ cost per customer = ad spend ÷ buyers referred by 9001 ◀──────┘
 ```
 
-- `id` برای هر رویداد یکتا باشد. ارسال دوباره‌ی همان `id` نادیده گرفته می‌شود.
-- حداکثر ۱۰۰۰ رویداد در هر درخواست: `{"events": [...]}`
-- اگر ربات این را ندارد، خروجی فروش را با ستون‌های `code,event,amount,id,ts` در صفحه‌ی «خرید و ردیابی» به‌صورت CSV وارد کنید.
+</div>
+
+1. در ربات برای هر گروه آگهی یک حساب معرف بسازید.
+2. در صفحه‌ی «فروش و رفرال» شناسه‌ی عددی آن را به‌عنوان برچسب وارد کنید (دکمه‌ی «بررسی» وجودش را تأیید می‌کند).
+3. موقع ساخت یا ویرایش آگهی برچسب را انتخاب کنید تا لینک آگهی `?start=کد` بگیرد.
+4. کاربران دعوت‌شده و خریدهایشان (نوع تراکنش‌های خرید در تنظیمات حساب قابل تغییر است) خودکار خوانده و به آگهی وصل می‌شوند.
+
+## ساختار پروژه
+
+<div dir="ltr">
+
+```
+backend/                 FastAPI · SQLAlchemy 2 (async) · SQLite (WAL) · Alembic · Pydantic v2
+  app/core/              settings, encryption, security, errors, logging
+  app/models/            accounts, ads, stats, referral tags, bot users & transactions, texts, jobs…
+  app/integrations/      Telegram Ads API, sales-bot API, Claude API clients
+  app/services/          sync, metrics, rules, actions, ads, texts, referrals, analysis
+  app/api/v1/routes/     REST API (/api/v1), session cookie + CSRF
+  app/workers/           per-account sync scheduler + job queue (single process)
+  tests/                 pytest (respx mocks) · tests/e2e Playwright · tests/mocks fake APIs
+frontend/                React 19 · Vite · TypeScript · Tailwind v4 · shadcn/ui (Radix) · TanStack Query
+  src/components/ui/     shadcn components (RTL)
+  src/pages/account/     per-account pages: dashboard, ads, proposals, texts, sales, analysis, activity, settings
+deploy/                  docker-compose.yml + Caddyfile used by the installer
+install.sh               installer and `tgads` management command
+```
+
+</div>
+
+## توسعه
+
+<div dir="ltr">
+
+```bash
+# backend (needs uv)
+cd backend && uv sync
+ADMIN_PASSWORD=devpassword SESSION_SECRET=$(openssl rand -hex 24) \
+ENCRYPTION_KEY=$(openssl rand -base64 32 | tr '+/' '-_') COOKIE_SECURE=0 \
+uv run uvicorn app.main:app --reload
+
+# fake Telegram Ads / bot / Claude APIs for local testing
+uv run python -m tests.mocks.server   # tokens: mocktoken-a, mocktoken-b · bot keys: botkey-a, botkey-b
+# start the backend with TG_ADS_API_BASE=http://127.0.0.1:8790 ANTHROPIC_API_BASE=http://127.0.0.1:8792
+
+# frontend (proxies /api to :8000)
+cd frontend && pnpm install && pnpm dev
+
+# checks
+cd backend && uv run ruff check . && uv run mypy app && uv run pytest
+cd frontend && pnpm lint && pnpm typecheck && pnpm test && pnpm build
+cd backend && RUN_E2E=1 uv run --group e2e pytest tests/e2e   # after `pnpm build`
+sudo bash tests/installer/test_install.sh
+```
+
+</div>
 
 ## امنیت
 
-- توکن تلگرام و رمزها فقط در `/opt/psychonet-ads/.env` روی سرور هستند (دسترسی 600). نه در پایگاه داده و مخزن ذخیره می‌شوند، نه در پنل نمایش داده می‌شوند.
-- برنامه فقط روی `127.0.0.1:8000` گوش می‌دهد. از بیرون فقط از راه Caddy (HTTPS) یا تونل SSH دیده می‌شود.
-- ورود با رمز است. بعد از ۵ تلاش ناموفق، ورود ۱۰ دقیقه بسته می‌شود. همه‌ی فرم‌ها توکن CSRF دارند.
-- هر تغییر پولی کلید یکتا (idempotency) دارد، تا تکرار درخواست هیچ‌وقت دو بار پول جابه‌جا نکند.
-- همه‌ی شارژها سقف هر آگهی و سقف روزانه دارند. در تنظیمات، «توقف اقدام‌ها» و «توقف کامل همه‌ی آگهی‌ها» هم هست.
-- پشتیبان‌ها شامل `.env` هستند، پس پوشه‌ی `backups` فقط برای root خواندنی است.
-- این مخزن عمومی است. هیچ‌وقت توکن، رمز یا داده‌ی کمپین را در آن commit نکنید (`.gitignore` جلوی `.env` و `data/` را می‌گیرد).
+- پنل فقط با رمز باز می‌شود؛ کوکی نشست `HttpOnly` و `Secure` است، درخواست‌های تغییر‌دهنده توکن CSRF می‌خواهند و تلاش‌های ناموفق ورود محدود می‌شوند.
+- توکن Telegram Ads، کلید ربات‌ها و کلید Claude با `ENCRYPTION_KEY` رمزنگاری می‌شوند و فقط چهار حرف آخرشان نمایش داده می‌شود. فایل پشتیبان کلید را هم دارد؛ آن را خصوصی نگه دارید.
+- برنامه فقط روی `127.0.0.1` گوش می‌دهد و از بیرون فقط از طریق Caddy (HTTPS) در دسترس است.
+- هر جابه‌جایی پول (شارژ/برداشت) کلید idempotency دارد و سقف‌های ایمنی قابل تنظیم است.
 
-## توسعه و تست
+## مجوز
 
-```bash
-pip install -r requirements.txt
-bash tests/run_e2e.sh        # API ساختگی تلگرام ادز + برنامه + همه‌ی سناریوها، بدون پول واقعی
-```
+MIT
 
-برای اجرای دستی با API ساختگی:
-۱. اجرا کنید: `python tests/mock_tgads.py 8790`
-۲. در `.env` بنویسید:
-   - `TG_ADS_TOKEN=mocktoken`
-   - `TG_ADS_API_BASE=http://127.0.0.1:8790`
-   - `COOKIE_SECURE=0`
-۳. اجرا کنید: `uvicorn app.main:app --port 8800`
-
-```
-app/
-  main.py        صفحه‌ها و مسیرها
-  tgads.py       اتصال به API تلگرام ادز
-  sync.py        همگام‌سازی
-  metrics.py     محاسبه‌ی معیارها
-  rules.py       قاعده‌ها و پیشنهادها
-  actions.py     صف اجرا (توقف، برداشت، شارژ) و سقف‌ها
-  create.py      ساخت آگهی با لینک ردیابی
-  analysis.py    ردیابی خرید، خروجی برای Claude، Claude API (اختیاری)
-  scheduler.py   اجرای خودکار در پس‌زمینه (فقط یک worker)
-deploy/          docker-compose و Caddyfile سرور (استفاده‌شده در install.sh)
-install.sh       نصب و مدیریت
-tests/           API ساختگی و تست کامل
-```
-
-فونت وزیرمتن با مجوز SIL OFL همراه برنامه است (`app/static/fonts/OFL.txt`).
+</div>

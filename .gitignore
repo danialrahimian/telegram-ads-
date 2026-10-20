@@ -1,4 +1,12 @@
 .env
 data/
+backend/data/
 __pycache__/
 *.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+node_modules/
+frontend/dist/
+coverage/

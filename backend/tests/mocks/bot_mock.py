@@ -1,0 +1,119 @@
+"""In-memory fake of the sales bot admin API (Token header, `actions` dispatch, {status,msg,obj}).
+
+Two keys: "botkey-a" (bot of account A) and "botkey-b". "botkey-limited" is a key without the
+`users` permission, to exercise the 403 path. Referrers 9001/9002 (A) and 9101 (B) each referred users,
+some of whom bought.
+"""
+
+import random
+import threading
+from datetime import datetime, timedelta
+from typing import Any
+
+KEYS = {"botkey-a": "a", "botkey-b": "b", "botkey-limited": "a"}
+REFERRERS = {"a": {"9001": 40, "9002": 12}, "b": {"9101": 25}}
+
+
+class BotMock:
+    def __init__(self, seed: int = 11) -> None:
+        self.lock = threading.Lock()
+        self.calls: list[tuple[str, str, str]] = []
+        rnd = random.Random(seed)
+        self.data: dict[str, dict[str, Any]] = {}
+        now = datetime.now()
+        for key in ("a", "b"):
+            users: dict[str, list[dict[str, Any]]] = {}
+            txs: list[dict[str, Any]] = []
+            uid = 700000 if key == "a" else 800000
+            for ref, n in REFERRERS[key].items():
+                lst = []
+                for _ in range(n):
+                    uid += 1
+                    reg = now - timedelta(days=rnd.randint(1, 40), minutes=rnd.randint(0, 600))
+                    lst.append({"id": uid, "username": f"u{uid}", "register": int(reg.timestamp()), "Balance": 0})
+                    if rnd.random() < 0.3:
+                        when = reg + timedelta(hours=rnd.randint(1, 48))
+                        txs.append(self._tx(len(txs) + 1, uid, "buy", 59000, min(when, now)))
+                users[ref] = lst
+            for _ in range(160):  # organic sales from users that did not come through a tag
+                uid += 1
+                when = now - timedelta(days=rnd.randint(0, 59), minutes=rnd.randint(0, 1400))
+                typ = rnd.choice(["buy", "buy", "buy_extend", "charge_gateway", "cashback"])
+                txs.append(self._tx(len(txs) + 1, uid, typ, rnd.choice([59000, 89000, 119000]), when))
+            self.data[key] = {
+                "users": users,
+                "txs": sorted(txs, key=lambda t: t["created_at"], reverse=True),
+                "count_user": 1500 if key == "a" else 600,
+            }
+
+    @staticmethod
+    def _tx(i: int, uid: int, typ: str, amount: int, when: datetime) -> dict[str, Any]:
+        return {
+            "id": i,
+            "id_user": uid,
+            "type": typ,
+            "source": "bot",
+            "amount": amount,
+            "created_at": when.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    def add_user(self, key: str, referrer: str, buy: bool = True) -> int:
+        """Simulate a new user arriving through a referral link (used by the e2e test)."""
+        with self.lock:
+            d = self.data[key]
+            uid = 990000 + sum(len(v) for v in d["users"].values())
+            now = datetime.now()
+            d["users"].setdefault(referrer, []).append(
+                {"id": uid, "username": f"u{uid}", "register": int(now.timestamp())}
+            )
+            d["count_user"] += 1
+            if buy:
+                d["txs"].insert(0, self._tx(len(d["txs"]) + 1000, uid, "buy", 59000, now))
+            return uid
+
+    def handle(self, token: str, method: str, path: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        key = KEYS.get(token)
+        if key is None:
+            return 403, {"status": False, "msg": "token invalid", "obj": []}
+        action = str(body.get("actions") or "")
+        with self.lock:
+            self.calls.append((key, path, action))
+            d = self.data[key]
+            if path == "/api/statbot":
+                return 200, {"count_user": d["count_user"], "count_invoice": len(d["txs"]), "count_agent": 3}
+            if path != "/api/users":
+                return 200, {"status": False, "msg": "Action Invalid", "obj": []}
+            if token == "botkey-limited":
+                return 403, {"status": False, "msg": "access denied", "obj": []}
+            if method != "GET":
+                return 200, {"status": False, "msg": "method invalid", "obj": []}
+            page = max(1, int(body.get("page") or 1))
+            limit = max(1, min(int(body.get("limit") or 50), 1000))
+            if action == "transactions":
+                rows = d["txs"]
+                if body.get("from"):
+                    lo = int(body["from"])
+                    rows = [
+                        t
+                        for t in rows
+                        if int(datetime.strptime(t["created_at"], "%Y-%m-%d %H:%M:%S").timestamp()) >= lo
+                    ]
+                chunk = rows[(page - 1) * limit : page * limit]
+                return 200, {
+                    "status": True,
+                    "msg": "Successful",
+                    "obj": {"transactions": chunk, "total": len(rows), "page": page},
+                }
+            if action == "affiliates_users":
+                rows = d["users"].get(str(body.get("chat_id")), [])
+                return 200, {"status": True, "msg": "Successful", "obj": rows[(page - 1) * limit : page * limit]}
+            if action == "user":
+                cid = str(body.get("chat_id"))
+                if cid in d["users"] or cid.isdigit():
+                    return 200, {
+                        "status": True,
+                        "msg": "Successful",
+                        "obj": {"user": {"id": int(cid), "affiliatescount": len(d["users"].get(cid, []))}},
+                    }
+                return 200, {"status": False, "msg": "user not found", "obj": []}
+            return 200, {"status": False, "msg": "Action Invalid", "obj": []}

@@ -9,28 +9,101 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   IMAGE: ghcr.io/danialrahimian/telegram-ads
 
 jobs:
-  test:
+  backend:
+    name: Backend (ruff, mypy, pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy app
+      - run: uv run pytest -q
+
+  frontend:
+    name: Frontend (eslint, tsc, vitest, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4   # version comes from "packageManager" in package.json
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 3
+
+  e2e:
+    name: End-to-end (Playwright, desktop + mobile)
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --frozen --group e2e
+      - run: uv run playwright install --with-deps chromium
+      - name: Browser tests against the real backend and mocked Telegram/bot/Claude APIs
+        run: uv run pytest tests/e2e -v
+        env:
+          RUN_E2E: "1"
+          E2E_SCREENSHOTS: ${{ github.workspace }}/screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: screenshots
+          retention-days: 7
+
+  installer:
+    name: Installer (shellcheck + stubbed run)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install
-        run: pip install -r requirements.txt pyflakes
-      - name: Lint Python
-        run: python -m pyflakes app tests
-      - name: Lint shell
-        run: shellcheck -S warning install.sh tests/run_e2e.sh
-      - name: End-to-end test against a fake Telegram Ads API
-        run: bash tests/run_e2e.sh
+      - run: shellcheck -S warning install.sh tests/installer/test_install.sh
+      - run: sudo bash tests/installer/test_install.sh
 
   image:
-    needs: test
+    name: Docker image
+    needs: [e2e, installer]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -65,8 +138,18 @@ jobs:
           build-args: APP_VERSION=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Smoke test the image
+        run: |
+          docker run -d --name smoke -p 8000:8000 \
+            -e ADMIN_PASSWORD=smoke-test-pass -e SESSION_SECRET="$(openssl rand -hex 24)" \
+            -e ENCRYPTION_KEY="$(openssl rand -base64 32 | tr '+/' '-_')" -e COOKIE_SECURE=0 \
+            "${IMAGE}:sha-${GITHUB_SHA::7}"
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8000/healthz && break; sleep 2; done
+          curl -fs http://127.0.0.1:8000/ | grep -q 'lang="fa"'
+          docker logs smoke
 
   release:
+    name: GitHub release
     needs: image
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -74,21 +157,21 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Create GitHub release
+      - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > notes.md <<NOTES
-          **Install:**
+          **Install** (asks only for a domain and a password):
           \`\`\`
           sudo bash -c "\$(curl -fsSL https://github.com/${GITHUB_REPOSITORY}/raw/main/install.sh)" @ install
           \`\`\`
-          **Update an existing server to this version:** \`psychonet-ads update --version ${GITHUB_REF_NAME}\`
+          **Update an existing server:** \`tgads update --version ${GITHUB_REF_NAME}\`
+          (servers still on v1 \`psychonet-ads\` are migrated automatically by the install command)
 
           Image: \`${IMAGE}:${GITHUB_REF_NAME#v}\`
           NOTES
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            # Release was created in the GitHub UI: keep its text and add the install notes on top.
             { cat notes.md; echo; gh release view "$GITHUB_REF_NAME" --json body --jq .body; } > merged.md
             gh release edit "$GITHUB_REF_NAME" --notes-file merged.md
           else
