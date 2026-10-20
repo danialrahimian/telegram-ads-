@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}نمای کلی{% endblock %}
+{% block heading %}نمای کلی{% endblock %}
+{% block content %}
+{% set m = sm['28'] %}{% set w = sm['7'] %}
+<div class="kpis">
+  <div class="kpi"><div class="l">هزینه‌ی ۲۸ روز اخیر (TON)</div><div class="v">{{ m.spent|ton }}</div>
+    <div class="s">۲۸ روز قبلش: <span class="num">{{ m.prev_spent|ton }}</span></div></div>
+  <div class="kpi"><div class="l">استارت ربات (۲۸ روز)</div><div class="v">{{ m.starts|num }}</div>
+    <div class="s">۷ روز اخیر: <span class="num">{{ w.starts|num }}</span></div></div>
+  <div class="kpi"><div class="l">هزینه هر استارت (۲۸ روز)</div><div class="v">{{ m.cps|cps }}</div>
+    <div class="s">{% if m.cps and m.prev_cps %}{% set ch = (m.cps - m.prev_cps) / m.prev_cps %}
+      <span class="num {{ 'up-bad' if ch > 0 else 'down-good' }}">{{ '+' if ch > 0 }}{{ ch|pct(0) }}</span> نسبت به ۲۸ روز قبل{% else %}بدون دوره‌ی قبل برای مقایسه{% endif %}</div></div>
+  <div class="kpi"><div class="l">خرید ثبت‌شده (۲۸ روز)</div><div class="v">{{ sm.purchases_28|num }}</div>
+    <div class="s">{% if sm.purchases_28 %}هزینه هر مشتری: <span class="num">{{ (m.spent / sm.purchases_28)|cps }}</span>{% else %}<a href="/conversions">ردیابی خرید را راه بیندازید</a>{% endif %}</div></div>
+  <div class="kpi"><div class="l">آگهی در حال نمایش</div><div class="v">{{ running_count|num }}</div>
+    <div class="s">{% if sm.counts.review %}{{ sm.counts.review }} در حال بررسی · {% endif %}{% if sm.counts.declined %}<span class="bad">{{ sm.counts.declined }} رد شده</span>{% endif %}</div></div>
+  <div class="kpi"><div class="l">بودجه‌ی خوابیده (TON)</div><div class="v">{{ stalled_budget|ton }}</div>
+    <div class="s">روی آگهی‌های فعالی که تقریباً نمایش ندارند</div></div>
+</div>
+
+<div class="grid">
+  <div class="card"><h2>هزینه‌ی روزانه</h2><p class="note">۶۰ روز اخیر، TON</p>
+    <div class="chart" data-src="daily-data" data-kind="bars" data-value="spent" data-fmt="ton"></div></div>
+  <div class="card"><h2>هزینه هر استارت (میانگین ۷ روزه)</h2><p class="note">خط‌چین: سقف توقف در تنظیمات ({{ settings.stop_cost_per_start }})</p>
+    <div class="chart" data-src="daily-data" data-kind="line" data-value="cps7" data-fmt="cps" data-target="{{ settings.stop_cost_per_start }}" data-target-label="سقف توقف"></div></div>
+</div>
+<script type="application/json" id="daily-data">{{ daily|safe }}</script>
+
+<div class="grid">
+  <div class="card">
+    <div class="row"><h2>پیشنهادهای در انتظار</h2></div>
+    <p class="note">هیچ‌کدام بدون تأیید شما اجرا نمی‌شود.</p>
+    {% for p in proposals %}
+      <div class="prop"><div class="head"><span><span class="tag {{ 'bad' if p.kind in ('stop','withdraw') else 'ok' if p.kind=='topup' else 'warn' }}">{{ kind_label[p.kind] }}</span>
+        <a href="/ads/{{ p.ad_id }}">{{ (p.target_label or p.ad_id)|t }}</a></span>
+        {% if p.amount %}<span class="num">{{ p.amount|ton }} TON</span>{% endif %}</div>
+        <div class="small muted">{{ p.reason }}</div></div>
+    {% else %}<div class="empty">پیشنهادی در انتظار نیست.</div>{% endfor %}
+    {% if pending_count %}<a class="btn pri" href="/proposals">بررسی همه ({{ pending_count }})</a>{% endif %}
+  </div>
+  <div class="card">
+    <h2>نیاز به توجه</h2><p class="note">آگهی‌های در حال بررسی یا ردشده</p>
+    {% if review %}<div class="wrapx"><table><thead><tr><th>جایگاه</th><th>وضعیت</th><th>دلیل</th></tr></thead><tbody>
+    {% for r in review %}<tr><td><a href="/ads/{{ r.ad_id }}">{{ (r.target_label or r.title)|t }}</a></td><td>{{ status_label(r) }}</td><td class="small">{{ r.decline_reason or '—' }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty">موردی نیست.</div>{% endif %}
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card"><h2>ارزان‌ترین استارت‌ها</h2><p class="note">آگهی‌های در حال نمایش، ۲۸ روز اخیر، دست‌کم ۱۰ استارت</p>
+    {% if top %}<div class="wrapx"><table><thead><tr><th>جایگاه</th><th class="n">استارت</th><th class="n">هزینه</th><th class="n">هزینه/استارت</th></tr></thead><tbody>
+    {% for r in top %}<tr><td><a href="/ads/{{ r.ad_id }}">{{ (r.target_label or r.title)|t }}</a></td><td class="n">{{ r.starts_28|num }}</td><td class="n">{{ r.spent_28|ton }}</td><td class="n good">{{ r.cps_28|cps }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty">هنوز داده‌ی کافی نیست.</div>{% endif %}</div>
+  <div class="card"><h2>گران‌ترین استارت‌ها</h2><p class="note">آگهی‌های در حال نمایش، ۲۸ روز اخیر، دست‌کم ۰٫۳ TON خرج</p>
+    {% if worst %}<div class="wrapx"><table><thead><tr><th>جایگاه</th><th class="n">استارت</th><th class="n">هزینه</th><th class="n">هزینه/استارت</th></tr></thead><tbody>
+    {% for r in worst %}<tr><td><a href="/ads/{{ r.ad_id }}">{{ (r.target_label or r.title)|t }}</a></td><td class="n">{{ r.starts_28|num }}</td><td class="n">{{ r.spent_28|ton }}</td><td class="n {{ 'bad' if (r.cps_28 or 9) > settings.stop_cost_per_start }}">{{ r.cps_28|cps }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty">هنوز داده‌ی کافی نیست.</div>{% endif %}</div>
+</div>
+{% endblock %}

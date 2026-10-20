@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}کارها و گزارش{% endblock %}
+{% block heading %}کارها و گزارش{% endblock %}
+{% block content %}
+<div class="card mb">
+  <h2>صف اجرا</h2><p class="note">هر تغییر روی تلگرام. کارهای ناموفق تا ۴ بار دوباره امتحان می‌شوند.</p>
+  {% if jobs %}<div class="scroll"><table><thead><tr><th>ساخته‌شده</th><th>آگهی</th><th>کار</th><th class="n">مبلغ</th><th>وضعیت</th><th>زمان اجرا</th><th>نتیجه</th></tr></thead><tbody>
+  {% for j in jobs %}<tr><td class="small">{{ j.created_at|jdatetime }}</td><td><a href="/ads/{{ j.ad_id }}">{{ (j.target_label or j.ad_id)|t }}</a></td><td>{{ JOB.get(j.kind, j.kind) }}</td>
+  <td class="n">{{ j.amount|ton if j.amount else '—' }}</td><td><span class="tag {{ 'ok' if j.status=='done' else 'bad' if j.status=='failed' else 'warn' }}">{{ JOB_STATUS.get(j.status, j.status) }}</span></td>
+  <td class="small">{{ j.run_at|jdatetime }}</td><td class="small">{{ j.result or '' }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty">صف خالی است.</div>{% endif %}
+</div>
+<div class="card">
+  <h2>گزارش</h2>
+  {% if last_sync.errors %}<p class="small warn">خطاهای آخرین همگام‌سازی: {% for e in last_sync.errors %}<span class="ltr">{{ e }}</span>{{ '، ' if not loop.last }}{% endfor %}</p>{% endif %}
+  <div class="scroll"><table><thead><tr><th>زمان</th><th>چه کسی</th><th>کار</th><th>آگهی</th><th>جزئیات</th></tr></thead><tbody>
+  {% for e in entries %}<tr><td class="small">{{ e.ts|jdatetime }}</td><td class="small">{{ e.actor }}</td><td class="small ltr">{{ e.action }}</td><td>{% if e.ad_id %}<a href="/ads/{{ e.ad_id }}">{{ e.ad_id }}</a>{% endif %}</td><td class="small">{{ e.detail }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endblock %}

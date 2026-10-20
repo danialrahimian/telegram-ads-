@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}متن‌ها{% endblock %}
+{% block heading %}متن‌ها و تست A/B{% endblock %}
+{% block content %}
+<div class="card mb">
+  <p class="note">هر آگهی که از این برنامه ساخته شود به متنش وصل می‌شود، تا ببینید کدام متن ارزان‌تر استارت و خرید می‌آورد. ویرایش متنی که روی آگهی‌ها استفاده شده، نسخه‌ی تازه می‌سازد تا آمار قبلی به‌هم نریزد.</p>
+  {% if rows %}<div class="wrapx"><table><thead><tr><th>متن</th><th class="n">آگهی</th><th class="n">CTR</th><th class="n">استارت</th><th class="n">خرج</th><th class="n">هزینه/استارت</th><th class="n">خرید</th><th class="n">هزینه/مشتری</th><th></th></tr></thead><tbody>
+  {% for v in rows %}<tr>
+    <td><b>{{ v.name }}</b>{% if not v.active %} <span class="tag">غیرفعال</span>{% endif %}<div class="small muted">{{ v.text }}</div></td>
+    <td class="n">{{ v.ads|num }}</td><td class="n">{{ v.ctr|pct }}</td><td class="n">{{ (v.starts or 0)|num }}</td><td class="n">{{ (v.spent or 0)|ton }}</td>
+    <td class="n">{{ v.cps|cps }}</td><td class="n">{{ v.purchases|num }}</td><td class="n">{{ v.cpp|cps }}</td>
+    <td><form method="post" action="/variants" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="vid" value="{{ v.id }}"><input type="hidden" name="op" value="toggle"><button class="btn sm">{{ 'غیرفعال' if v.active else 'فعال' }}</button></form></td>
+  </tr>{% endfor %}</tbody></table></div>{% endif %}
+</div>
+<div class="grid">
+  <div class="card"><h2>متن تازه</h2>
+    <form method="post" action="/variants" class="stack"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="f"><span>نام</span><input type="text" name="name" placeholder="مثلاً د: تخفیف" required></label>
+      <label class="f"><span>متن (حداکثر ۱۶۰ کاراکتر)</span><textarea name="text" data-max="160" data-counter="new-count" required></textarea><div class="counter" id="new-count"></div></label>
+      <div><button class="btn pri">افزودن</button></div></form></div>
+  <div class="card"><h2>ویرایش متن</h2>
+    {% for v in rows if v.active %}
+    <form method="post" action="/variants" class="stack mb"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="vid" value="{{ v.id }}">
+      <label class="f"><span>نام</span><input type="text" name="name" value="{{ v.name }}" required></label>
+      <label class="f"><span>متن</span><textarea name="text" data-max="160" data-counter="c{{ v.id }}" required>{{ v.text }}</textarea><div class="counter" id="c{{ v.id }}"></div></label>
+      <div><button class="btn">ذخیره</button></div></form>
+    {% endfor %}</div>
+</div>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}تحلیل با Claude{% endblock %}
+{% block heading %}تحلیل با Claude{% endblock %}
+{% block content %}
+<div class="grid">
+<div class="card">
+  <h2>بسته‌ی تحلیل برای Claude</h2>
+  <p class="note">همه‌ی داده‌ها در یک فایل zip: آگهی‌ها با معیارها، آمار روزانه، خریدها، خلاصه و یک متن آماده برای درخواست تحلیل. فایل را در گفت‌وگو با Claude آپلود کنید و متن PROMPT.txt را بفرستید.</p>
+  <a class="btn pri" href="/analysis/export.zip">دانلود بسته</a>
+</div>
+<div class="card">
+  <h2>تحلیل مستقیم از داخل برنامه</h2>
+  {% if has_key %}
+  <p class="note">خلاصه‌ی داده (بدون توکن تلگرام یا رمزها) به Claude API ({{ model }}) فرستاده می‌شود. هر درخواست هزینه‌ی API دارد.</p>
+  <form method="post" action="/analysis/ask" class="stack" data-confirm="خلاصه‌ی داده برای تحلیل به Claude API فرستاده شود؟">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="f"><span>سؤال</span><textarea name="question" placeholder="عملکرد ۲۸ روز اخیر را تحلیل کن و قدم‌به‌قدم بگو این هفته چه کار کنم."></textarea></label>
+    <div><button class="btn pri">تحلیل کن</button></div>
+  </form>
+  {% else %}
+  <p class="note">این بخش خاموش است چون <code>ANTHROPIC_API_KEY</code> در فایل .env تنظیم نشده. دسترسی به Claude API فقط در <a href="https://anthropic.com/supported-countries" rel="noopener">کشورهای پشتیبانی‌شده</a> ممکن است؛ بدون آن، از «بسته‌ی تحلیل» استفاده کنید.</p>
+  {% endif %}
+</div>
+</div>
+{% for a in history %}
+<div class="card mb"><h2>{{ a.ts|jdatetime }}</h2><p class="note">{{ a.question }}</p><pre class="out">{{ a.output }}</pre></div>
+{% endfor %}
+{% endblock %}

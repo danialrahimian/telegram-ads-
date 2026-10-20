@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ (ad.target_label or ad.title)|t }}{% endblock %}
+{% block heading %}{{ (ad.target_label or ad.title)|t }}{% endblock %}
+{% block content %}
+<div class="row mb">
+  <span class="tag {{ 'ok' if ad.running else 'warn' }}">{{ status_label(ad) }}</span>
+  <span class="tag">{{ PLACEMENT.get(ad.placement, ad.placement) }}</span>
+  <span class="tag">آگهی {{ ad.ad_id }}</span>
+  {% if ad.code %}<span class="tag acc ltr">{{ ad.code }}</span>{% endif %}
+</div>
+<div class="kpis">
+  <div class="kpi"><div class="l">هزینه هر استارت (۲۸ روز)</div><div class="v">{{ ad.cps_28|cps }}</div><div class="s">کل عمر: <span class="num">{{ ad.cps|cps }}</span></div></div>
+  <div class="kpi"><div class="l">خرج ۲۸ روز (TON)</div><div class="v">{{ ad.spent_28|ton }}</div><div class="s">کل: <span class="num">{{ ad.spent_budget|ton }}</span></div></div>
+  <div class="kpi"><div class="l">استارت ۲۸ روز</div><div class="v">{{ ad.starts_28|num }}</div><div class="s">کل: <span class="num">{{ ad.actions|num }}</span></div></div>
+  <div class="kpi"><div class="l">بودجه‌ی مانده (TON)</div><div class="v">{{ ad.remaining_budget|ton }}</div><div class="s">CPM {{ ad.cpm }}</div></div>
+  <div class="kpi"><div class="l">خرید ثبت‌شده</div><div class="v">{{ ad.purchases|num }}</div><div class="s">{% if ad.cpp %}هزینه هر مشتری <span class="num">{{ ad.cpp|cps }}</span>{% elif not ad.code %}کد ردیابی ندارد{% else %}هنوز خریدی نیامده{% endif %}</div></div>
+</div>
+<div class="grid">
+  <div class="card"><h2>خرج روزانه</h2><p class="note">TON</p><div class="chart" data-src="ad-daily" data-kind="bars" data-value="spent" data-fmt="ton"></div></div>
+  <div class="card"><h2>استارت روزانه</h2><p class="note">تعداد شروع ربات</p><div class="chart" data-src="ad-daily" data-kind="bars" data-value="starts" data-fmt="int"></div></div>
+</div>
+<script type="application/json" id="ad-daily">{{ daily|safe }}</script>
+<div class="grid">
+  <div class="card">
+    <h2>اقدام‌ها</h2><p class="note">همه‌چیز در صف اجرا می‌رود و در «کارها و گزارش» ثبت می‌شود.</p>
+    <div class="row">
+      {% if ad.running %}
+      <form method="post" action="/ads/{{ ad.ad_id }}/action" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="pause"><button class="btn">توقف موقت</button></form>
+      {% elif ad.status == 'active' and ad.is_paused %}
+      <form method="post" action="/ads/{{ ad.ad_id }}/action" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="resume"><button class="btn">ادامه‌ی نمایش</button></form>
+      {% endif %}
+      {% if ad.remaining_budget and ad.remaining_budget > 0 %}
+      <form method="post" action="/ads/{{ ad.ad_id }}/action" class="inline" data-confirm="آگهی متوقف و کل بودجه‌ی مانده‌اش ({{ ad.remaining_budget|ton }} TON) به حساب برگردانده شود؟"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="withdraw"><button class="btn danger">توقف و پس گرفتن بودجه</button></form>
+      {% endif %}
+      <a class="btn" href="/new?from={{ ad.ad_id }}">آگهی تازه در همین جایگاه</a>
+    </div>
+    <form method="post" action="/ads/{{ ad.ad_id }}/action" class="row mt" data-confirm="این مبلغ از موجودی حساب به آگهی اضافه شود؟">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="topup">
+      <label class="f"><span>شارژ (TON، حداکثر {{ settings.topup_max_per_ad }})</span><input type="number" name="amount" step="0.01" min="0.01" max="{{ settings.topup_max_per_ad }}" value="0.5"></label>
+      <button class="btn pri">شارژ</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>ردیابی و یادداشت</h2>
+    <p class="note">کد ردیابی همان مقدار بعد از <code>?start=</code> در لینک آگهی است. برای آگهی‌های قدیمی بدون کد خالی بگذارید.</p>
+    <form method="post" action="/ads/{{ ad.ad_id }}/meta" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="fields">
+        <label class="f"><span>کد ردیابی</span><input type="text" name="code" value="{{ ad.code }}" dir="ltr"></label>
+        <label class="f"><span>متن استفاده‌شده</span><select name="variant_id"><option value="">—</option>{% for v in variants %}<option value="{{ v.id }}" {{ 'selected' if v.id == ad.variant_id }}>{{ v.name }}</option>{% endfor %}</select></label>
+      </div>
+      <label class="f"><span>یادداشت</span><input type="text" name="note" value="{{ ad.note }}"></label>
+      <div><button class="btn">ذخیره</button></div>
+    </form>
+  </div>
+</div>
+<div class="grid">
+  <div class="card"><h2>متن و لینک</h2>
+    <div class="copy">{{ ad.text }}</div>
+    <dl class="kv"><dt>لینک</dt><dd class="ltr small">{{ ad.promote_url }}</dd><dt>ساخته‌شده</dt><dd>{{ ad.created_date|jdate }}</dd>
+    <dt>اولین روز نمایش</dt><dd>{{ ad.first_day|jdate }}</dd><dt>آخرین روز خرج</dt><dd>{{ ad.last_spend|jdate }}</dd>
+    {% if ad.decline_reason %}<dt>دلیل رد</dt><dd class="bad">{{ ad.decline_reason }}</dd>{% endif %}</dl>
+  </div>
+  <div class="card"><h2>تاریخچه‌ی این آگهی</h2>
+    {% if jobs or props %}<div class="wrapx"><table><thead><tr><th>زمان</th><th>مورد</th><th>نتیجه</th></tr></thead><tbody>
+    {% for p in props %}<tr><td class="small">{{ p.created_at|jdatetime }}</td><td>{{ kind_label[p.kind] }}</td><td class="small">{{ PROP_STATUS.get(p.status, p.status) }}{% if p.result %} · {{ p.result }}{% endif %}</td></tr>{% endfor %}
+    {% for j in jobs %}<tr><td class="small">{{ j.created_at|jdatetime }}</td><td>{{ JOB.get(j.kind, j.kind) }}{% if j.amount %} <span class="num">{{ j.amount|ton }}</span>{% endif %}</td><td class="small">{{ JOB_STATUS.get(j.status, j.status) }}{% if j.result %} · {{ j.result }}{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty">هنوز اقدامی ثبت نشده.</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

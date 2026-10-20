@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %} · مدیریت تبلیغات سایکونت</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="layout">
+  <aside class="side">
+    <div class="brand"><span class="dot"></span>تبلیغات سایکونت</div>
+    <nav>
+      <a href="/" class="{{ 'on' if nav=='overview' }}">نمای کلی</a>
+      <a href="/proposals" class="{{ 'on' if nav=='proposals' }}">پیشنهادها {% if pending_count %}<span class="badge">{{ pending_count }}</span>{% endif %}</a>
+      <a href="/ads" class="{{ 'on' if nav in ('ads','ad') }}">آگهی‌ها</a>
+      <a href="/new" class="{{ 'on' if nav=='new' }}">آگهی جدید</a>
+      <a href="/variants" class="{{ 'on' if nav=='variants' }}">متن‌ها</a>
+      <a href="/conversions" class="{{ 'on' if nav=='conversions' }}">خرید و ردیابی</a>
+      <a href="/analysis" class="{{ 'on' if nav=='analysis' }}">تحلیل با Claude</a>
+      <a href="/log" class="{{ 'on' if nav=='log' }}">کارها و گزارش {% if queued_count %}<span class="badge soft">{{ queued_count }}</span>{% endif %}</a>
+      <a href="/settings" class="{{ 'on' if nav=='settings' }}">تنظیمات</a>
+    </nav>
+    <div class="foot">
+      <div>موجودی حساب: <b class="num">{{ account.remaining_budget|ton }}</b> TON</div>
+      <div>روی آگهی‌ها: <b class="num">{{ account.ads_budget|ton }}</b> TON</div>
+      <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">خروج</button></form>
+      <div class="small mt">نسخه <span class="ltr">{{ version }}</span></div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="top">
+      <h1>{% block heading %}{% endblock %}</h1>
+      <div class="meta">
+        <span class="pill">همگام‌سازی: <b>{{ 'در حال اجرا…' if syncing else last_sync.at|ago }}</b></span>
+        <form method="post" action="/sync" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">همگام‌سازی الان</button></form>
+      </div>
+    </div>
+    {% if settings.automation_paused %}<div class="warnbar">اقدام‌ها متوقف است: هیچ تغییری روی آگهی‌ها اجرا نمی‌شود (به‌جز توقف). از <a href="/settings">تنظیمات</a> دوباره فعالش کنید.</div>{% endif %}
+    {% if last_loop.error %}<div class="warnbar">آخرین اجرای خودکار خطا داشت: <span class="ltr">{{ last_loop.error }}</span></div>{% endif %}
+    {% if last_sync.errors %}<div class="warnbar">آمار {{ last_sync.errors|length }} آگهی در آخرین همگام‌سازی گرفته نشد. جزئیات در <a href="/log">گزارش</a>.</div>{% endif %}
+    {% for kind, msg in flashes %}<div class="flash {{ kind }}">{{ msg }}</div>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+</body>
+</html>

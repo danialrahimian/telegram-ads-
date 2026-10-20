@@ -1,0 +1,15 @@
+# Development: builds the image from this folder.  docker compose up --build
+# For servers use install.sh (deploy/docker-compose.yml with the published image).
+services:
+  app:
+    build:
+      context: .
+      args:
+        APP_VERSION: dev
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "127.0.0.1:8000:8000"

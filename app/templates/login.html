@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ورود · مدیریت تبلیغات سایکونت</title><link rel="stylesheet" href="/static/app.css"></head>
+<body><div class="login"><div class="card">
+  <h2>مدیریت تبلیغات سایکونت</h2>
+  <p class="note">برای ادامه رمز مدیر را وارد کنید.</p>
+  {% if insecure %}<div class="flash bad">این صفحه با http باز شده ولی COOKIE_SECURE=1 است، پس ورود کار نمی‌کند. یا از آدرس https استفاده کنید، یا برای تونل SSH در فایل .env بنویسید COOKIE_SECURE=0 و برنامه را دوباره راه بیندازید.</div>{% endif %}
+  {% for p in problems %}<div class="flash bad">{{ p }}</div>{% endfor %}
+  {% if error %}<div class="flash bad">{{ error }}</div>{% endif %}
+  <form method="post" action="/login" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="f"><span>رمز</span><input type="password" name="password" autocomplete="current-password" autofocus required></label>
+    <button class="btn pri">ورود</button>
+  </form>
+  <p class="small muted mt">نسخه <span class="ltr">{{ version }}</span></p>
+</div></div></body></html>

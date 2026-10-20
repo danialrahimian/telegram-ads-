@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}آگهی جدید{% endblock %}
+{% block heading %}آگهی جدید{% endblock %}
+{% block content %}
+{% set kind = form.kind or prefill.kind or 'channel' %}
+{% set vsel = (form.variant_id or suggested)|string %}
+<div class="grid">
+<div class="card">
+  {% if src %}<div class="flash ok">آگهی تازه برای جایگاه <b>{{ src.target_label|t }}</b>. بعد از ساخت، آگهی قدیمی ({{ src.ad_id }}) متوقف می‌شود و بودجه‌اش برمی‌گردد.</div>{% endif %}
+  <form method="post" action="/new" enctype="multipart/form-data" class="stack" data-confirm="آگهی ساخته شود و بودجه از حساب کم شود؟">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if prefill.replace_ad_id or form.replace_ad_id %}<input type="hidden" name="replace_ad_id" value="{{ prefill.replace_ad_id or form.replace_ad_id }}">{% endif %}
+    <div class="fields">
+      <label class="f"><span>نوع جایگاه</span>
+        <select name="kind" data-kind-switch data-cpm="cpm">
+          <option value="channel" {{ 'selected' if kind=='channel' }}>پست کانال</option>
+          <option value="bot" {{ 'selected' if kind=='bot' }}>بنر ربات</option>
+        </select></label>
+      <label class="f"><span>نام کاربری کانال یا ربات</span><input type="text" name="username" dir="ltr" placeholder="@channel" value="{{ form.username or prefill.username or '' }}" required></label>
+    </div>
+    <label class="f"><span>متن (از کتابخانه یا دستی)</span>
+      <select name="variant_id" data-fill="ad-text">
+        <option value="" data-text="">متن دستی</option>
+        {% for v in variants %}<option value="{{ v.id }}" data-text="{{ v.text }}" {{ 'selected' if v.id|string == vsel }}>{{ v.name }}</option>{% endfor %}
+      </select></label>
+    <label class="f"><span>متن آگهی</span>
+      {% set chosen = (variants|selectattr('id', 'equalto', vsel|int)|list) %}
+      <textarea name="text" id="ad-text" data-max="160" data-counter="ad-count" required>{{ form.text if form.text else (chosen[0].text if chosen else '') }}</textarea>
+      <div class="counter" id="ad-count"></div></label>
+    <div class="fields">
+      <label class="f"><span>CPM (TON)</span><input type="number" id="cpm" name="cpm" step="0.01" min="0.01" data-channel="{{ settings.default_cpm_channel }}" data-bot="{{ settings.default_cpm_bot }}" value="{{ form.cpm or prefill.cpm or (settings.default_cpm_bot if kind=='bot' else settings.default_cpm_channel) }}" required></label>
+      <label class="f"><span>بودجه‌ی اولیه (TON)</span><input type="number" name="budget" step="0.01" min="0" value="{{ form.budget or settings.default_budget }}" required></label>
+      <label class="f"><span>کد ردیابی (خالی = خودکار)</span><input type="text" name="code" dir="ltr" value="{{ form.code or '' }}" placeholder="c_channel_1"></label>
+    </div>
+    <label class="f" data-only="channel"><span>عکس (اختیاری، JPG یا PNG، ۱۶:۹، دست‌کم ۶۴۰ پیکسل عرض؛ CPM لازم را بالا می‌برد)</span><input type="file" name="photo" accept="image/jpeg,image/png"></label>
+    <label class="row" data-only="bot"><input type="checkbox" name="show_userpic" value="1" checked> نمایش عکس پروفایل ربات خودتان</label>
+    <label class="f"><span>یادداشت (اختیاری)</span><input type="text" name="note" value="{{ form.note or '' }}"></label>
+    <div><button class="btn pri">ساخت آگهی</button></div>
+  </form>
+</div>
+<div class="card">
+  <h2>قبل از ساخت</h2>
+  <ul class="small">
+    <li>لینک آگهی به‌شکل <code>t.me/{{ settings.bot_username }}?start=کد</code> ساخته می‌شود تا خریدها به همین آگهی نسبت داده شوند.</li>
+    <li>کانال را باز کنید و مطمئن شوید فعال است و پست تازه دارد.</li>
+    <li>جایگاه‌های خبری، سیاسی، کریپتو و عمومی در تحلیل قبلی گران بودند؛ کانال‌ها و ربات‌های فروش فیلترشکن بهترین بودند.</li>
+    <li>متنی که هنوز کمتر استفاده شده به‌صورت پیش‌فرض انتخاب می‌شود تا تست A/B متعادل بماند.</li>
+    <li>متنی که جای خالی مثل <code>[مدت]</code> دارد پذیرفته نمی‌شود؛ اول آن را در «متن‌ها» درست کنید.</li>
+    <li>آگهی بعد از ساخت به بررسی تلگرام می‌رود. وضعیتش در همگام‌سازی بعدی دیده می‌شود.</li>
+  </ul>
+</div>
+</div>
+{% endblock %}

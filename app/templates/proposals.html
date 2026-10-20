@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}پیشنهادها{% endblock %}
+{% block heading %}پیشنهادها{% endblock %}
+{% block content %}
+<div class="card mb">
+  <div class="row">
+    <p class="note">برنامه بعد از هر همگام‌سازی آگهی‌ها را با قاعده‌های <a href="/settings">تنظیمات</a> می‌سنجد و پیشنهاد می‌دهد. تا شما تأیید نکنید، هیچ تغییری در تلگرام انجام نمی‌شود.
+    «توقف و پس گرفتن بودجه» اول آگهی را متوقف می‌کند و حدود ۱۱ دقیقه بعد بودجه را به حساب برمی‌گرداند (قانون تلگرام).
+    شارژ در ۲۴ ساعت اخیر: <span class="num">{{ topup_used|ton }}</span> از سقف <span class="num">{{ settings.topup_daily_cap }}</span> TON.</p>
+  </div>
+  <form method="post" action="/rules-run" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">بررسی دوباره‌ی قاعده‌ها</button></form>
+</div>
+{% for kind in ('stop', 'withdraw', 'topup', 'refresh') %}{% if groups.get(kind) %}
+<div class="card mb">
+  <div class="row">
+    <h2>{{ kind_label[kind] }} <span class="badge soft">{{ groups[kind]|length }}</span></h2>
+    {% if kind != 'refresh' %}
+    <form method="post" action="/proposals-approve-kind" class="inline" data-confirm="همه‌ی {{ groups[kind]|length }} مورد «{{ kind_label[kind] }}» تأیید شوند؟">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="kind" value="{{ kind }}"><button class="btn pri sm">تأیید همه</button></form>
+    {% endif %}
+  </div>
+  <p class="note">{% if kind=='stop' %}هزینه‌ی این آگهی‌ها از سقف بالاتر است.{% elif kind=='withdraw' %}این آگهی‌ها بودجه دارند ولی تلگرام دیگر نمایششان نمی‌دهد؛ بودجه بیکار مانده.{% elif kind=='topup' %}آگهی‌های خوبی که بودجه‌شان کم شده.{% else %}این آگهی‌ها گران‌تر از هفته‌های اولشان شده‌اند. «تأیید» شما را به ساخت آگهی تازه در همان جایگاه می‌برد و آگهی قدیمی را متوقف می‌کند.{% endif %}</p>
+  {% for p in groups[kind] %}
+  <div class="prop">
+    <div class="head">
+      <span><a href="/ads/{{ p.ad_id }}"><b>{{ (p.target_label or p.ad_id)|t }}</b></a> <span class="muted small">{{ PLACEMENT.get(p.placement, '') }}</span></span>
+      <span class="row">
+        {% if p.amount %}<span class="num"><b>{{ p.amount|ton }}</b> TON</span>{% endif %}
+        <form method="post" action="/proposals/{{ p.id }}/approve" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn pri sm">تأیید</button></form>
+        <form method="post" action="/proposals/{{ p.id }}/reject" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">رد</button></form>
+      </span>
+    </div>
+    <div class="small">{{ p.reason }}</div>
+    <div class="small muted">خرج ۲۸ روز <span class="num">{{ p.m.spent_28|ton }}</span> · استارت ۲۸ روز <span class="num">{{ p.m.starts_28|num }}</span> · هزینه/استارت ۷ روز <span class="num">{{ p.m.cps_7|cps }}</span> · سن <span class="num">{{ p.m.age_days }}</span> روز{% if p.m.purchases %} · خرید <span class="num">{{ p.m.purchases }}</span>{% endif %}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}{% endfor %}
+{% if not groups %}<div class="card mb"><div class="empty">پیشنهادی در انتظار نیست. همه‌ی آگهی‌ها در محدوده‌ی قاعده‌ها هستند.</div></div>{% endif %}
+<div class="card">
+  <h2>تاریخچه</h2>
+  {% if history %}<div class="scroll"><table><thead><tr><th>زمان</th><th>جایگاه</th><th>پیشنهاد</th><th class="n">مبلغ</th><th>وضعیت</th></tr></thead><tbody>
+  {% for p in history %}<tr><td class="small">{{ (p.decided_at or p.created_at)|jdatetime }}</td><td><a href="/ads/{{ p.ad_id }}">{{ (p.target_label or p.ad_id)|t }}</a></td><td>{{ kind_label[p.kind] }}</td>
+  <td class="n">{{ p.amount|ton if p.amount else '—' }}</td><td class="small">{{ PROP_STATUS.get(p.status, p.status) }}{% if p.result %} · {{ p.result }}{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty">هنوز چیزی نیست.</div>{% endif %}
+</div>
+{% endblock %}

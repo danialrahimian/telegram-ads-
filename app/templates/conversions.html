@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}خرید و ردیابی{% endblock %}
+{% block heading %}خرید و ردیابی{% endblock %}
+{% block content %}
+<div class="grid">
+<div class="card">
+  <h2>چطور کار می‌کند</h2>
+  <ol class="small">
+    <li>هر آگهی که اینجا ساخته شود لینکی مثل <code>t.me/{{ settings.bot_username }}?start=c_vaslino_1</code> دارد.</li>
+    <li>وقتی کاربر ربات را با این لینک باز کند، تلگرام کد را به‌صورت <code>/start c_vaslino_1</code> به ربات می‌فرستد.</li>
+    <li>ربات باید این کد را کنار شناسه‌ی کاربر نگه دارد و وقتی همان کاربر خرید کرد، خرید را با همان کد به این برنامه بفرستد.</li>
+    <li>آن وقت هزینه‌ی واقعی هر مشتری برای هر آگهی و هر متن حساب می‌شود و قاعده‌ها به‌جای «استارت» با «خرید» تصمیم می‌گیرند.</li>
+  </ol>
+  {% if not secret_set %}<div class="flash bad">CONVERSIONS_SECRET در فایل .env تنظیم نشده؛ آدرس API تا آن موقع غیرفعال است. ورود فایل CSV کار می‌کند.</div>{% endif %}
+</div>
+<div class="card">
+  <h2>پیام آماده برای برنامه‌نویس ربات</h2>
+  <p class="note">کلید را جداگانه و امن بفرستید، نه داخل همین پیام.</p>
+  <pre class="out ltr small" id="dev-msg">When a user opens the bot with /start &lt;code&gt;, store &lt;code&gt; with the user id
+(keep the first code the user came with). Then send events to:
+
+POST {{ endpoint }}
+Authorization: Bearer &lt;CONVERSIONS_SECRET&gt;
+Content-Type: application/json
+
+On /start with a code:
+{"code": "c_vaslino_1", "event": "start", "id": "start-&lt;telegram_user_id&gt;"}
+
+On every successful purchase by a user who has a stored code:
+{"code": "c_vaslino_1", "event": "purchase", "amount": 59000, "id": "order-&lt;order_id&gt;"}
+
+"id" must be unique per event (re-sending the same id is ignored).
+"amount" is optional (any currency, used only for totals).
+Several events at once: {"events": [ ... ]}  (max 1000)
+Reply: {"ok": true, "added": 1, "duplicates": 0, "errors": []}</pre>
+  <button class="btn sm mt" type="button" data-copy="dev-msg">کپی</button>
+</div>
+</div>
+<div class="grid">
+<div class="card">
+  <h2>ورود از فایل CSV</h2>
+  <p class="note">اگر ربات فقط خروجی فروش می‌دهد: ستون‌های <code>code,event,amount,id,ts</code>. فقط code لازم است؛ event پیش‌فرض purchase است؛ ts تاریخ ISO مثل <code>2026-10-20</code>.</p>
+  <form method="post" action="/conversions/import" enctype="multipart/form-data" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="file" name="file" accept=".csv,text/csv" required><button class="btn pri">ورود</button>
+  </form>
+</div>
+<div class="card">
+  <h2>آخرین رویدادها</h2>
+  {% if recent %}<div class="scroll"><table><thead><tr><th>زمان</th><th>کد</th><th>رویداد</th><th class="n">مبلغ</th></tr></thead><tbody>
+  {% for r in recent %}<tr><td class="small">{{ r.ts|jdatetime }}</td><td class="ltr small">{{ r.code }}</td><td>{{ 'خرید' if r.event=='purchase' else 'استارت' }}</td><td class="n">{{ r.amount|num if r.amount else '—' }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty">هنوز رویدادی نرسیده.</div>{% endif %}
+</div>
+</div>
+<div class="card mb">
+  <h2>هزینه‌ی هر مشتری به تفکیک آگهی</h2>
+  {% if rows %}<div class="scroll"><table><thead><tr><th>کد</th><th>جایگاه</th><th class="n">خرج</th><th class="n">استارت (تلگرام)</th><th class="n">خرید</th><th class="n">نرخ خرید</th><th class="n">هزینه/مشتری</th><th class="n">درآمد</th></tr></thead><tbody>
+  {% for r in rows %}<tr><td class="ltr small"><a href="/ads/{{ r.ad_id }}">{{ r.code }}</a></td><td>{{ r.target_label|t }}</td><td class="n">{{ r.spent_budget|ton }}</td><td class="n">{{ r.actions|num }}</td><td class="n">{{ r.purchases|num }}</td><td class="n">{{ r.buy_rate|pct }}</td>
+  <td class="n {{ 'bad' if r.cpp and r.cpp > settings.target_cost_per_customer else 'good' if r.cpp }}">{{ r.cpp|cps }}</td><td class="n">{{ r.revenue|num if r.revenue else '—' }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty">هنوز آگهی‌ای کد ردیابی ندارد. آگهی‌های تازه را از «آگهی جدید» بسازید.</div>{% endif %}
+  {% if orphan %}<p class="small warn mt">کدهایی رسیده‌اند که به هیچ آگهی وصل نیستند: {% for o in orphan %}<code>{{ o.code }}</code> ({{ o.n }}) {% endfor %}— از صفحه‌ی هر آگهی می‌توانید کدش را ثبت کنید.</p>{% endif %}
+</div>
+{% endblock %}

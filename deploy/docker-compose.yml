@@ -1,0 +1,37 @@
+# Production setup used by install.sh. APP_IMAGE and COMPOSE_PROFILES come from .env.
+services:
+  app:
+    image: ${APP_IMAGE:?APP_IMAGE is not set in .env}
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "127.0.0.1:8000:8000"   # reachable only on the server itself (Caddy or an SSH tunnel)
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  caddy:   # HTTPS for your domain; enabled when COMPOSE_PROFILES=https
+    image: caddy:2
+    profiles: ["https"]
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  caddy_data:
+  caddy_config:
