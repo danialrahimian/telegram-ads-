@@ -87,4 +87,10 @@ jobs:
 
           Image: \`${IMAGE}:${GITHUB_REF_NAME#v}\`
           NOTES
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --generate-notes
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # Release was created in the GitHub UI: keep its text and add the install notes on top.
+            { cat notes.md; echo; gh release view "$GITHUB_REF_NAME" --json body --jq .body; } > merged.md
+            gh release edit "$GITHUB_REF_NAME" --notes-file merged.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --generate-notes
+          fi
