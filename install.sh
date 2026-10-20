@@ -168,7 +168,9 @@ ensure_docker() {
 
 check_token() { # check_token TOKEN -> prints account, returns 1 if refused
   local out
-  out="$(curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $1" "$TG_API/getCurrentAccount" 2>&1 || true)"
+  # Telegram rejects a POST without a body (HTTP 411), so send an empty JSON object.
+  out="$(curl -sS --max-time 20 -X POST -H "Authorization: Bearer $1" -H "Content-Type: application/json" \
+    --data '{}' "$TG_API/getCurrentAccount" 2>&1 || true)"
   if printf '%s' "$out" | grep -q '"ok":true'; then
     ok "Telegram Ads token works (account: $(printf '%s' "$out" | sed -nE 's/.*"title":"([^"]*)".*/\1/p'))"
     return 0
