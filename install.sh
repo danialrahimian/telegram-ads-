@@ -109,7 +109,9 @@ latest_version() {
   local tag
   tag="$(curl -fsSL --max-time 15 "$API/releases/latest" 2>/dev/null | grep -m1 '"tag_name"' \
     | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' || true)"
-  echo "${tag:-main}"
+  # Releases older than v2 belong to the previous app (psychonet-ads); never install them from here.
+  case "$tag" in v0.*|v1.*|"") tag="main" ;; esac
+  echo "$tag"
 }
 image_tag_for() { # v1.2.3 -> 1.2.3, main -> main
   if [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "${1#v}"; else echo "$1"; fi

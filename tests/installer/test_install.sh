@@ -102,4 +102,13 @@ check "status works"                    'true'
 bash "$ROOT/install.sh" uninstall --yes > /dev/null 2>&1
 check "uninstall keeps data with --yes" '[ -f "$INSTALL_DIR/data/app.db" ] && [ ! -e "$BIN_PATH" ]'
 
+echo "a v1 release is never picked as the latest version"
+cat > "$STUB/curl-v1" <<'S'
+#!/usr/bin/env bash
+echo '{"tag_name": "v1.4.0"}'
+S
+chmod +x "$STUB/curl-v1"
+v="$(PATH="$WORK/v1bin:$PATH"; mkdir -p "$WORK/v1bin"; cp "$STUB/curl-v1" "$WORK/v1bin/curl"; bash "$ROOT/install.sh" version 2>/dev/null | tail -n1)"
+check "falls back to main"              '[ "$v" = "latest: main" ]'
+
 echo "all $pass installer checks passed"
