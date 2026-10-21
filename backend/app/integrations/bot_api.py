@@ -1,4 +1,4 @@
-"""Client for the sales bot's admin API ("VPN Bot — Admin API", Mirza-style).
+"""Client for the sales bot's admin API ("VPN Bot — Admin API" v1.1, subscription edition of the bot).
 
 Facts from the bot's OpenAPI document:
   * Auth: header `Token: <bot token or API key>`. A key without permission gets HTTP 403 "access denied".
@@ -226,7 +226,7 @@ class BotApiClient:
         try:
             data = resp.json()
         except ValueError:
-            # PHP errors come back as HTML/text; a short excerpt tells the bot developer what broke.
+            # Server errors may come back as HTML/text; a short excerpt tells the bot developer what broke.
             snippet = body_excerpt(resp.text)
             msg = f"HTTP {resp.status_code}" + (f" — {snippet}" if snippet else "")
             raise BotApiError(msg, http_status=resp.status_code, path=path, action=actions or "") from None

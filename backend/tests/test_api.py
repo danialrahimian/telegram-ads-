@@ -259,7 +259,7 @@ async def test_referral_tags_attribution(api, bot_mock):
 
 
 async def test_bot_whose_unfiltered_ledger_crashes(api, bot_mock):
-    """A real bot build answers HTTP 500 (PHP fatal, HTML body) unless `type` is given."""
+    """The bot answers HTTP 500 with a non-JSON body unless `type` is given (seen on the real bot)."""
     from app.integrations import bot_api
 
     bot_api._tx_shape.clear()

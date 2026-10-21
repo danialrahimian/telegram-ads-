@@ -7,7 +7,7 @@ A rebuild of the project as a multi-account Telegram Ads manager.
 **New**
 - Several Telegram Ads accounts, each with its own route (`/accounts/<slug>`), dashboard, ads, rules, texts, sales and Claude analysis.
 - Connections are entered in the dashboard: Telegram Ads token and the sales-bot API (base URL, bot username, per-bot API key), each with a health check. Secrets are stored encrypted (Fernet) and never shown in full.
-- Sales-bot integration (Mirza-style admin API): bot stats, transactions and referral users. Per-ad sales attribution through referral tags (`?start=` invite links of separate referrer accounts) with cost per customer per ad, per tag and per text.
+- Sales-bot integration ("VPN Bot — Admin API", subscription edition): bot stats, transactions and referral users. Per-ad sales attribution through referral tags (`?start=` invite links of separate referrer accounts) with cost per customer per ad, per tag and per text.
 - Periodic sync per account with configurable intervals (ads/balance, daily stats, sales bot), exponential backoff, an immediate re-sync when credentials change, and a live "today" view; the dashboard polls every few seconds (configurable).
 - Text library: manual editing with versioning, Claude analysis (score, strengths, issues) and rewrites that can be edited before saving; performance of each text.
 - New React frontend: Vite, TypeScript, Tailwind v4, shadcn/ui (Radix), TanStack Query, Recharts; Persian RTL, Shamsi dates, dark mode, fully responsive (tables become cards on mobile).

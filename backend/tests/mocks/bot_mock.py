@@ -11,8 +11,8 @@ from datetime import datetime, timedelta
 from typing import Any
 
 KEYS = {"botkey-a": "a", "botkey-b": "b", "botkey-limited": "a", "botkey-crash": "b"}
-# "botkey-crash" behaves like a customised bot build seen in the wild: the unfiltered ledger dies with a PHP
-# fatal error (HTTP 500, HTML body) while the documented per-type query works; referrals come as obj.users.
+# "botkey-crash" reproduces what the real (subscription) bot did: the unfiltered ledger fails with an
+# HTTP 500 and a non-JSON body, while the documented per-type query is assumed to work; referrals as obj.users.
 RAW = "__raw__"
 PHP_FATAL = "<br />\n<b>Fatal error</b>:  Uncaught TypeError: explode(): Argument #2 ($string) must be of type string, null given in /var/www/bot/api/users.php:812"
 REFERRERS = {"a": {"9001": 40, "9002": 12}, "b": {"9101": 25}}
