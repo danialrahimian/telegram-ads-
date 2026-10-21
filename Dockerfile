@@ -22,7 +22,7 @@ FROM python:3.13-slim
 ARG APP_VERSION=dev
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/venv/bin:$PATH" \
     APP_VERSION=${APP_VERSION} DATA_DIR=/app/data FRONTEND_DIST=/app/frontend/dist
-LABEL org.opencontainers.image.source="https://github.com/danialrahimian/telegram-ads-" \
+LABEL org.opencontainers.image.source="https://github.com/danialrahimian/telegram-ads-manager" \
       org.opencontainers.image.title="Telegram Ads Manager" \
       org.opencontainers.image.description="Multi-account Telegram Ads manager with sales-bot attribution and Claude analysis" \
       org.opencontainers.image.version="${APP_VERSION}"

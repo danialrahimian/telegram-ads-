@@ -2,7 +2,7 @@
 
 # Telegram Ads Manager
 
-[![CI](https://github.com/danialrahimian/telegram-ads-/actions/workflows/ci.yml/badge.svg)](https://github.com/danialrahimian/telegram-ads-/actions/workflows/ci.yml)
+[![CI](https://github.com/danialrahimian/telegram-ads-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/danialrahimian/telegram-ads-manager/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
@@ -45,7 +45,7 @@
 <div dir="ltr">
 
 ```bash
-sudo bash -c "$(curl -fsSL https://github.com/danialrahimian/telegram-ads-/raw/main/install.sh)" @ install
+sudo bash -c "$(curl -fsSL https://github.com/danialrahimian/telegram-ads-manager/raw/main/install.sh)" @ install
 ```
 
 </div>

@@ -2,13 +2,13 @@
 # Telegram Ads Manager — installer and management command.
 #
 # Install (asks only for a domain and a password):
-#   sudo bash -c "$(curl -fsSL https://github.com/danialrahimian/telegram-ads-/raw/main/install.sh)" @ install
+#   sudo bash -c "$(curl -fsSL https://github.com/danialrahimian/telegram-ads-manager/raw/main/install.sh)" @ install
 # Afterwards the same script is available as:  tgads <command>
 #
 # Telegram Ads tokens, sales-bot API keys and the Claude key are entered in the dashboard, not here.
 set -Eeuo pipefail
 
-REPO="danialrahimian/telegram-ads-"
+REPO="danialrahimian/telegram-ads-manager"
 IMAGE_REPO="ghcr.io/danialrahimian/telegram-ads"
 APP="tgads"
 INSTALL_DIR="${INSTALL_DIR:-/opt/tgads}"
