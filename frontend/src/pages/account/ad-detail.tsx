@@ -59,7 +59,7 @@ export default function AdDetailPage() {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1.5">
-          <Button asChild variant="ghost" size="sm" className="-ms-2 text-muted-foreground">
+          <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
             <Link to=".." relative="path">
               <ArrowRightIcon /> آگهی‌ها
             </Link>

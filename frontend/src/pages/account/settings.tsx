@@ -204,8 +204,8 @@ function TelegramCard({ account }: { account: Account }) {
           </div>
         </form>
       </CardContent>
-      <CardFooter className="border-t pt-4 text-xs text-muted-foreground">
-        <ServerIcon className="me-1.5 size-3.5 shrink-0" />
+      <CardFooter className="block border-t pt-4 text-xs leading-relaxed text-muted-foreground">
+        <ServerIcon className="me-1.5 inline size-3.5 align-[-2px]" />
         اگر تلگرام خطای IP داد، آی‌پی سرور را در تنظیمات API تلگرام مجاز کنید:
         {sys.data?.server_ip ? (
           <span className="ms-1 inline-flex items-center">

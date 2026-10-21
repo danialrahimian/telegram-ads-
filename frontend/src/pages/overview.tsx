@@ -81,11 +81,13 @@ function AccountCard({ a }: { a: OverviewAccount }) {
           </span>
           {a.name}
         </CardTitle>
-        <CardDescription className="flex flex-wrap items-center gap-1.5 pt-1">
-          <span className="text-xs">Telegram Ads</span>
-          <HealthBadge status={a.telegram.status} configured={a.telegram.configured} />
-          <span className="ms-1 text-xs">ربات</span>
-          <HealthBadge status={a.bot.status} configured={a.bot.configured} />
+        <CardDescription className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1">
+          <span className="inline-flex items-center gap-1.5 text-xs">
+            Telegram Ads <HealthBadge status={a.telegram.status} configured={a.telegram.configured} />
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-xs">
+            ربات <HealthBadge status={a.bot.status} configured={a.bot.configured} />
+          </span>
         </CardDescription>
         <CardAction>
           {a.pending_proposals > 0 && (

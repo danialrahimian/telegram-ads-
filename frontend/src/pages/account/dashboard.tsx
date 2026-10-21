@@ -282,21 +282,32 @@ export default function DashboardPage() {
             <Link
               key={a.ad_id}
               to={`/accounts/${account.slug}/ads/${a.ad_id}`}
-              className="flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors hover:bg-muted/50"
+              className="flex flex-col gap-2 rounded-lg border px-3 py-2.5 transition-colors hover:bg-muted/50 sm:flex-row sm:items-center sm:gap-3"
             >
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{a.target_label || a.title || `#${a.ad_id}`}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium">{a.target_label || a.title || `#${a.ad_id}`}</span>
+                  <span className="shrink-0 sm:hidden">
+                    <AdStatusBadge status={a.status} paused={a.is_paused} />
+                  </span>
+                </div>
                 <div className="truncate text-xs text-muted-foreground">{a.text}</div>
               </div>
-              <div className="hidden text-end text-xs sm:block">
-                <div className="num font-medium">{money(a.spent_7, cur)}</div>
-                <div className="text-muted-foreground">خرج</div>
+              <div className="flex items-center gap-4 text-xs sm:gap-3">
+                <div className="sm:text-end">
+                  <span className="text-muted-foreground sm:hidden">خرج: </span>
+                  <span className="num font-medium">{money(a.spent_7, cur)}</span>
+                  <div className="hidden text-muted-foreground sm:block">خرج</div>
+                </div>
+                <div className="sm:text-end">
+                  <span className="text-muted-foreground sm:hidden">هر استارت: </span>
+                  <span className="num font-medium">{money(a.cps_7, cur)}</span>
+                  <div className="hidden text-muted-foreground sm:block">هر استارت</div>
+                </div>
+                <span className="hidden sm:inline-flex">
+                  <AdStatusBadge status={a.status} paused={a.is_paused} />
+                </span>
               </div>
-              <div className="text-end text-xs">
-                <div className="num font-medium">{money(a.cps_7, cur)}</div>
-                <div className="text-muted-foreground">هر استارت</div>
-              </div>
-              <AdStatusBadge status={a.status} paused={a.is_paused} />
             </Link>
           ))}
         </CardContent>

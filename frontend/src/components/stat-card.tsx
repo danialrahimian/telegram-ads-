@@ -27,9 +27,9 @@ export function StatCard({
 }) {
   const good = change == null || goodWhen === "neutral" ? null : goodWhen === "up" ? change >= 0 : change <= 0;
   return (
-    <Card className={cn("gap-2 px-4 py-4", className)}>
-      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span className="truncate">{label}</span>
+    <Card className={cn("gap-1.5 px-3 py-3 sm:gap-2 sm:px-4 sm:py-4", className)}>
+      <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground">
+        <span className="line-clamp-2 leading-snug">{label}</span>
         {Icon && <Icon className="size-4 shrink-0 opacity-70" />}
       </div>
       {loading ? (
@@ -37,7 +37,7 @@ export function StatCard({
       ) : (
         <div
           className={cn(
-            "num truncate text-xl font-bold tracking-tight sm:text-2xl",
+            "num text-lg leading-tight font-bold tracking-tight break-words sm:text-2xl",
             tone === "good" && "text-success",
             tone === "bad" && "text-destructive",
             tone === "warn" && "text-warning",
@@ -59,7 +59,7 @@ export function StatCard({
             {pct(Math.abs(change))}
           </span>
         )}
-        {hint && <span className="truncate">{hint}</span>}
+        {hint && <span className="leading-snug">{hint}</span>}
       </div>
     </Card>
   );

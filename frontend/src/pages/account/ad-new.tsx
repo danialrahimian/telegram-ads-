@@ -100,7 +100,7 @@ export default function AdNewPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
-      <Button asChild variant="ghost" size="sm" className="-ms-2 text-muted-foreground">
+      <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
         <Link to=".." relative="path">
           <ArrowRightIcon /> آگهی‌ها
         </Link>

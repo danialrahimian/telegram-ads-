@@ -232,41 +232,72 @@ def test_new_ad_form(page, shot):
     expect(page).to_have_url(re.compile(r"/accounts/darvaze/ads$"))
 
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        "/",
-        "/accounts/psychonet",
-        "/accounts/psychonet/ads",
-        "/accounts/psychonet/proposals",
-        "/accounts/psychonet/texts",
-        "/accounts/psychonet/sales",
-        "/accounts/psychonet/analysis",
-        "/accounts/psychonet/activity",
-        "/accounts/psychonet/settings",
-        "/settings",
-    ],
-)
-def test_mobile_layout_has_no_horizontal_scroll(browser, ctx, stack: Stack, shot, path, errors):
+OVERFLOW_JS = r"""
+() => {
+  // Elements that stick out of the page content area (or the screen), ignoring horizontally scrollable boxes.
+  const main = document.querySelector('main');
+  const ms = getComputedStyle(main), mr = main.getBoundingClientRect();
+  const left = mr.left + parseFloat(ms.paddingLeft) - 1, right = mr.right - parseFloat(ms.paddingRight) + 1;
+  const scrollBox = (el) => {
+    for (let p = el.parentElement; p && p !== main; p = p.parentElement) {
+      const o = getComputedStyle(p).overflowX;
+      if (o === 'auto' || o === 'scroll' || o === 'hidden' || o === 'clip') return true;
+    }
+    return false;
+  };
+  const bad = [];
+  for (const el of main.querySelectorAll('*')) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height || getComputedStyle(el).position === 'fixed' || scrollBox(el)) continue;
+    if (r.left < left || r.right > right) bad.push(`${el.tagName}.${String(el.className).slice(0, 60)} "${el.textContent.trim().slice(0, 30)}"`);
+  }
+  return {pageOverflow: document.documentElement.scrollWidth - window.innerWidth, bad: bad.slice(0, 5)};
+}
+"""
+
+RESPONSIVE_PAGES = [
+    "/",
+    "/accounts/psychonet",
+    "/accounts/psychonet/ads",
+    "/accounts/psychonet/ads/3",
+    "/accounts/psychonet/ads/new",
+    "/accounts/psychonet/proposals",
+    "/accounts/psychonet/texts",
+    "/accounts/psychonet/sales",
+    "/accounts/psychonet/analysis",
+    "/accounts/psychonet/activity",
+    "/accounts/psychonet/settings",
+    "/settings",
+    "/accounts/new",
+]
+
+
+@pytest.mark.parametrize("width", [360, 390, 768])
+def test_every_page_fits_small_screens(browser, ctx, stack: Stack, shot, width, errors):
     mctx = browser.new_context(
-        viewport=MOBILE,
+        viewport={"width": width, "height": 800},
         device_scale_factor=2,
-        is_mobile=True,
-        has_touch=True,
+        is_mobile=width < 700,
+        has_touch=width < 700,
         base_url=stack.base,
         storage_state=ctx.storage_state(),
     )
     p = mctx.new_page()
     p.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+    problems = []
     try:
-        p.goto(path)
-        p.wait_for_load_state("networkidle")
-        p.wait_for_timeout(400)
-        overflow = p.evaluate("document.documentElement.scrollWidth - window.innerWidth")
-        assert overflow <= 1, f"{path} overflows horizontally by {overflow}px"
-        shot(p, "m-" + (path.strip("/").replace("/", "-") or "overview"))
+        for path in RESPONSIVE_PAGES:
+            p.goto(path)
+            p.wait_for_load_state("networkidle")
+            p.wait_for_timeout(400)
+            res = p.evaluate(OVERFLOW_JS)
+            if res["pageOverflow"] > 1 or res["bad"]:
+                problems.append(f"{width}px {path}: {res}")
+            if width == 390:
+                shot(p, "m-" + (path.strip("/").replace("/", "-") or "overview"))
     finally:
         mctx.close()
+    assert problems == []
 
 
 def test_mobile_menu(browser, ctx, stack: Stack, shot):

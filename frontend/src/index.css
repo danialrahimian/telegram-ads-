@@ -134,6 +134,11 @@
     direction: ltr;
     unicode-bidi: isolate;
   }
+  /* Grid items default to min-width:auto and grow with long unbreakable content (URLs, numbers);
+     letting them shrink keeps every column inside the screen on phones. */
+  .grid > * {
+    min-width: 0;
+  }
   .wrap-anywhere {
     overflow-wrap: anywhere;
   }
