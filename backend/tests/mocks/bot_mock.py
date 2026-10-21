@@ -10,7 +10,11 @@ import threading
 from datetime import datetime, timedelta
 from typing import Any
 
-KEYS = {"botkey-a": "a", "botkey-b": "b", "botkey-limited": "a"}
+KEYS = {"botkey-a": "a", "botkey-b": "b", "botkey-limited": "a", "botkey-crash": "b"}
+# "botkey-crash" behaves like a customised bot build seen in the wild: the unfiltered ledger dies with a PHP
+# fatal error (HTTP 500, HTML body) while the documented per-type query works; referrals come as obj.users.
+RAW = "__raw__"
+PHP_FATAL = "<br />\n<b>Fatal error</b>:  Uncaught TypeError: explode(): Argument #2 ($string) must be of type string, null given in /var/www/bot/api/users.php:812"
 REFERRERS = {"a": {"9001": 40, "9002": 12}, "b": {"9101": 25}}
 
 
@@ -91,6 +95,10 @@ class BotMock:
             limit = max(1, min(int(body.get("limit") or 50), 1000))
             if action == "transactions":
                 rows = d["txs"]
+                if token == "botkey-crash":
+                    if not body.get("type"):
+                        return 500, {RAW: PHP_FATAL}
+                    rows = [t for t in rows if t["type"] == body["type"]]
                 if body.get("from"):
                     lo = int(body["from"])
                     rows = [
@@ -106,6 +114,12 @@ class BotMock:
                 }
             if action == "affiliates_users":
                 rows = d["users"].get(str(body.get("chat_id")), [])
+                if token == "botkey-crash":  # real shape: all rows, ids only, paging ignored
+                    return 200, {
+                        "status": True,
+                        "msg": "Successful",
+                        "obj": {"users": [{"user_id": u["id"]} for u in rows]},
+                    }
                 return 200, {"status": True, "msg": "Successful", "obj": rows[(page - 1) * limit : page * limit]}
             if action == "user":
                 cid = str(body.get("chat_id"))

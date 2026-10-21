@@ -13,6 +13,7 @@ were actually found.
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -51,6 +52,11 @@ class BotApiError(Exception):
             return f"کلید API به {where} دسترسی ندارد. در ربات، دسترسی این بخش را به کلید بدهید."
         if self.http_status is None:
             return f"اتصال به ربات برقرار نشد ({self.message})."
+        if self.http_status >= 500:
+            return (
+                f"{where}: خطای داخلی خودِ ربات ({self.message}). این خطا در سرور ربات رخ می‌دهد؛ "
+                "متن آن را برای توسعه‌دهنده‌ی ربات بفرستید."
+            )
         return f"{where}: {self.message}"
 
 
@@ -161,6 +167,25 @@ def norm_transaction(row: dict[str, Any], tz: ZoneInfo | None = None) -> dict[st
     }
 
 
+def body_excerpt(text: str, limit: int = 180) -> str:
+    """First readable words of a non-JSON error page (tags and the API key never included)."""
+    clean = re.sub(r"<[^>]+>", " ", text or "")
+    clean = re.sub(r"\s+", " ", clean).strip()
+    clean = re.sub(r"\s+([:.,;])", r"\1", clean)
+    return clean[:limit]
+
+
+# Request shapes tried for the transaction ledger, in order. Customised bot builds sometimes crash
+# (HTTP 500) when an optional filter is missing; the first shape that works is remembered per bot.
+TX_SHAPES: tuple[str, ...] = ("plain", "bounded", "empty_filters", "unpaged")
+_tx_shape: dict[str, str] = {}
+
+
+def retryable(e: BotApiError) -> bool:
+    """Only a crash on the bot side is worth another request shape; auth and validation errors are final."""
+    return (e.http_status or 0) >= 500
+
+
 def field_names(rows: list[dict[str, Any]]) -> list[str]:
     return sorted({str(k) for r in rows[:20] for k in r})
 
@@ -201,9 +226,10 @@ class BotApiClient:
         try:
             data = resp.json()
         except ValueError:
-            raise BotApiError(
-                f"HTTP {resp.status_code}", http_status=resp.status_code, path=path, action=actions or ""
-            ) from None
+            # PHP errors come back as HTML/text; a short excerpt tells the bot developer what broke.
+            snippet = body_excerpt(resp.text)
+            msg = f"HTTP {resp.status_code}" + (f" — {snippet}" if snippet else "")
+            raise BotApiError(msg, http_status=resp.status_code, path=path, action=actions or "") from None
         if resp.status_code >= 400:
             msg = str(data.get("msg") if isinstance(data, dict) else "") or f"HTTP {resp.status_code}"
             raise BotApiError(msg, http_status=resp.status_code, path=path, action=actions or "")
@@ -222,14 +248,46 @@ class BotApiClient:
         return {k: _int(v) for k, v in data.items() if k.startswith("count_")}
 
     async def transactions(
-        self, *, page: int = 1, limit: int = 500, from_ts: int | None = None, to_ts_: int | None = None
+        self,
+        *,
+        page: int = 1,
+        limit: int = 500,
+        from_ts: int | None = None,
+        to_ts_: int | None = None,
+        tx_type: str | None = None,
     ) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {"page": page, "limit": limit}
-        if from_ts:
-            params["from"] = from_ts
-        if to_ts_:
-            params["to"] = to_ts_
-        return extract_rows(await self.request("GET", "/api/users", "transactions", **params))
+        """One page of the wallet ledger (`users` → `transactions`), newest first."""
+        known = _tx_shape.get(self.base)
+        order = ([known] if known else []) + [x for x in TX_SHAPES if x != known]
+        first_error: BotApiError | None = None
+        for shape in order:
+            body: dict[str, Any] = {}
+            if shape != "unpaged":
+                body.update(page=page, limit=limit)
+            elif page > 1:
+                return []  # without paging the whole ledger came on page 1
+            if shape == "empty_filters":
+                body.update(q="", type="", source="")
+            if from_ts:
+                body["from"] = int(from_ts)
+            if to_ts_:
+                body["to"] = int(to_ts_)
+            if shape == "bounded":
+                body.setdefault("from", 1)
+                body.setdefault("to", int(datetime.now(UTC).timestamp()) + 86400)
+            if tx_type:
+                body["type"] = tx_type
+            try:
+                obj = await self.request("GET", "/api/users", "transactions", **body)
+            except BotApiError as e:
+                if not retryable(e):
+                    raise
+                first_error = first_error or e
+                continue
+            _tx_shape[self.base] = shape
+            return extract_rows(obj)
+        assert first_error is not None
+        raise first_error
 
     async def affiliates(self, chat_id: str, *, page: int = 1, limit: int = 1000) -> list[dict[str, Any]]:
         obj = await self.request("GET", "/api/users", "affiliates_users", chat_id=str(chat_id), page=page, limit=limit)

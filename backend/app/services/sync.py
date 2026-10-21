@@ -22,7 +22,15 @@ from app.core import crypto
 from app.core.logging import get_logger
 from app.db.base import now_ts
 from app.db.session import session_scope
-from app.integrations.bot_api import BotApiClient, BotApiError, field_names, norm_transaction, norm_user, zone
+from app.integrations.bot_api import (
+    BotApiClient,
+    BotApiError,
+    field_names,
+    norm_transaction,
+    norm_user,
+    retryable,
+    zone,
+)
 from app.integrations.telegram_ads import TelegramAdsClient, TelegramAdsError
 from app.models import Account, AccountSnapshot, Ad, AdStat, BotTransaction, BotUser, ReferralTag
 from app.services import events
@@ -294,6 +302,7 @@ async def bot_sync(account_id: int) -> dict[str, Any]:
     if not acc.bot_base_url or not key:
         raise SyncSkipped("bot not configured")
     tz = zone(st.get("bot_timezone", "UTC"))
+    purchase_types = [str(t) for t in st.get("purchase_types") or [] if str(t)]
     async with session_scope() as s:
         tags = [
             (t.id, t.referrer_id)
@@ -312,20 +321,38 @@ async def bot_sync(account_id: int) -> dict[str, Any]:
             stats = await c.statbot()
         except BotApiError as e:
             errors.append(e.friendly)
-        try:
+
+        async def ledger(tx_type: str | None = None) -> list[dict[str, Any]]:
+            out: list[dict[str, Any]] = []
             limit = 500
             for page in range(1, 101):
-                rows = await c.transactions(page=page, limit=limit, from_ts=from_ts)
+                rows = await c.transactions(page=page, limit=limit, from_ts=from_ts, tx_type=tx_type)
                 if page == 1 and rows:
                     fields["transactions"] = field_names(rows)
-                txs.extend(norm_transaction(r, tz) for r in rows)
+                batch = [norm_transaction(r, tz) for r in rows]
+                out.extend(batch)
                 if len(rows) < limit:
                     break
                 # Stop paging once a whole page is older than the window (bot ignoring `from`).
-                if all(0 < t["created_ts"] < from_ts for t in txs[-len(rows) :]):
+                if all(0 < t["created_ts"] < from_ts for t in batch):
                     break
+            return out
+
+        try:
+            txs = await ledger()
+            fields["transactions_mode"] = ["all"]
         except BotApiError as e:
-            errors.append(e.friendly)
+            # Some bot builds crash on the unfiltered ledger but answer the documented per-type query.
+            per_type: list[dict[str, Any]] = []
+            try:
+                if not (retryable(e) and purchase_types):
+                    raise e
+                for ptype in purchase_types:
+                    per_type.extend(await ledger(ptype))
+                txs = per_type
+                fields["transactions_mode"] = ["per_type"]
+            except BotApiError:
+                errors.append(e.friendly)
         for tag_id, referrer in tags:
             users: list[dict[str, Any]] = []
             try:

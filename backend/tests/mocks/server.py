@@ -11,7 +11,7 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from tests.mocks.bot_mock import BotMock
+from tests.mocks.bot_mock import RAW, BotMock
 from tests.mocks.tgads_mock import TgAdsMock
 
 
@@ -74,6 +74,14 @@ def make_bot_handler(mock: BotMock) -> type[BaseHTTPRequestHandler]:
                 self._send(200, {"ok": True, "user_id": uid})
                 return
             code, res = mock.handle(self.headers.get("Token", ""), method, self.path, body)
+            if RAW in res:
+                b = res[RAW].encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+                return
             self._send(code, res)
 
         def do_GET(self) -> None:

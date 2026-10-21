@@ -9,7 +9,7 @@ import pytest
 import respx
 from cryptography.fernet import Fernet
 
-from tests.mocks.bot_mock import BotMock
+from tests.mocks.bot_mock import RAW, BotMock
 from tests.mocks.tgads_mock import TgAdsMock
 
 TG_BASE = "https://tgads.test"
@@ -76,6 +76,8 @@ def http_mocks(tg_mock: TgAdsMock, bot_mock: BotMock) -> AsyncIterator[respx.Moc
     def bot_side_effect(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content or b"{}")
         code, res = bot_mock.handle(request.headers.get("Token", ""), request.method, request.url.path, body)
+        if RAW in res:
+            return httpx.Response(code, text=res[RAW], headers={"Content-Type": "text/html"})
         return httpx.Response(code, json=res)
 
     def claude_side_effect(request: httpx.Request) -> httpx.Response:

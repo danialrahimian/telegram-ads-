@@ -258,6 +258,59 @@ async def test_referral_tags_attribution(api, bot_mock):
     assert 0 < summ["attributed_28"]["buyers"] <= t2["buyers"]  # 28-day window vs all time
 
 
+async def test_bot_whose_unfiltered_ledger_crashes(api, bot_mock):
+    """A real bot build answers HTTP 500 (PHP fatal, HTML body) unless `type` is given."""
+    from app.integrations import bot_api
+
+    bot_api._tx_shape.clear()
+    acc = await make_account(
+        api, slug="darvaze", name="دروازه", token="mocktoken-b", bot_key="botkey-crash", bot_username="darvaze_test_bot"
+    )
+    check = acc["check"]
+    assert check["status"] == "ok", check
+    tx = next(c for c in check["checks"] if c["name"] == "transactions")
+    assert tx["ok"] and "فیلتر نوع خرید" in tx["message"] and "Fatal error" in tx["message"]
+    r = await api.post("/api/v1/accounts/darvaze/tags", json={"name": "معرف", "referrer_id": "9101"})
+    assert r.status_code == 201
+    await _sync_all("darvaze")
+    a = (await api.get("/api/v1/accounts/darvaze")).json()
+    assert a["bot"]["status"] == "ok", a["bot"]
+    assert a["bot"]["fields"]["transactions_mode"] == ["per_type"]
+    sales = (await api.get("/api/v1/accounts/darvaze/sales")).json()
+    types = {x["type"] for x in sales["overview"]["by_type"]}
+    assert types and types <= {"buy", "buy_extend"}
+    tag = sales["tags"][0]
+    assert tag["users"] == 25 and tag["buyers"] > 0  # referrals in the obj.users shape
+
+    # With purchase types cleared there is nothing to fall back to: the bot's own error is reported clearly.
+    r = await api.patch("/api/v1/accounts/darvaze", json={"settings": {"purchase_types": ["refund"]}})
+    assert r.status_code == 200
+    bot_api._tx_shape.clear()
+    bot_mock.data["b"]["txs"] = [t for t in bot_mock.data["b"]["txs"] if t["type"] != "refund"]
+    check = (await api.post("/api/v1/accounts/darvaze/bot/check")).json()["check"]
+    assert check["status"] == "ok"  # per-type query for "refund" works (zero rows)
+
+
+async def test_bot_server_error_message_is_readable():
+    import httpx
+
+    from app.integrations.bot_api import BotApiClient, BotApiError
+
+    def crash(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="<br />\n<b>Fatal error</b>: boom in /var/www/api/users.php:10")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(crash)) as http:
+        c = BotApiClient("https://bot.example", "secret-key", http=http)
+        try:
+            await c.transactions(limit=5)
+        except BotApiError as e:
+            assert e.http_status == 500
+            assert "Fatal error: boom" in e.friendly and "توسعه‌دهنده" in e.friendly
+            assert "secret-key" not in e.friendly
+        else:
+            raise AssertionError("expected an error")
+
+
 # ---------------------------------------------------------------- ads
 
 

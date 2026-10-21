@@ -253,7 +253,8 @@ function BotCard({ account }: { account: Account }) {
   });
   const checks = result?.checks;
   const stats = result?.stats ?? bot.stats;
-  const fieldList = Object.entries(bot.fields ?? {}).filter(([, v]) => v?.length);
+  const fieldList = Object.entries(bot.fields ?? {}).filter(([k, v]) => v?.length && k !== "transactions_mode");
+  const perType = bot.fields?.transactions_mode?.[0] === "per_type";
 
   return (
     <Card id="bot">
@@ -352,6 +353,15 @@ function BotCard({ account }: { account: Account }) {
             )}
           </div>
         </form>
+        {perType && (
+          <Alert variant="warning">
+            <AlertDescription>
+              گزارش کامل تراکنش‌ها در این ربات خطا می‌دهد؛ فروش فقط برای نوع‌های خرید (
+              <span className="ltr">{account.settings.purchase_types.join(", ")}</span>) جداگانه خوانده می‌شود. جدول
+              «تراکنش‌ها بر اساس نوع» هم فقط همین نوع‌ها را نشان می‌دهد.
+            </AlertDescription>
+          </Alert>
+        )}
         {fieldList.length > 0 && (
           <details className="rounded-lg border px-3 py-2 text-xs">
             <summary className="cursor-pointer text-muted-foreground">فیلدهای شناسایی‌شده در پاسخ ربات</summary>

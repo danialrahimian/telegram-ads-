@@ -1,5 +1,6 @@
 """Accounts: create/edit, connections (Telegram Ads token, sales bot API key) and health checks."""
 
+import contextlib
 import re
 from typing import Any
 
@@ -10,7 +11,14 @@ from app.core import crypto
 from app.core.config import get_settings
 from app.core.errors import AppError, Conflict, NotFound
 from app.db.base import now_ts
-from app.integrations.bot_api import BotApiClient, BotApiError, extract_rows, field_names, normalize_base_url
+from app.integrations.bot_api import (
+    BotApiClient,
+    BotApiError,
+    extract_rows,
+    field_names,
+    normalize_base_url,
+    retryable,
+)
 from app.integrations.telegram_ads import TelegramAdsClient, TelegramAdsError
 from app.models import Account
 from app.services import events
@@ -248,21 +256,35 @@ async def check_bot(s: AsyncSession, acc: Account) -> dict[str, Any]:
             )
         except BotApiError as e:
             checks.append({"name": "statbot", "label": "آمار ربات", "ok": False, "message": e.friendly})
+        label = "تراکنش‌ها (users → transactions)"
         try:
             rows = await c.transactions(limit=5)
             fields["transactions"] = field_names(rows)
             checks.append(
-                {
-                    "name": "transactions",
-                    "label": "تراکنش‌ها (users → transactions)",
-                    "ok": True,
-                    "message": f"{len(rows)} ردیف نمونه خوانده شد",
-                }
+                {"name": "transactions", "label": label, "ok": True, "message": f"{len(rows)} ردیف نمونه خوانده شد"}
             )
         except BotApiError as e:
-            checks.append(
-                {"name": "transactions", "label": "تراکنش‌ها (users → transactions)", "ok": False, "message": e.friendly}
-            )
+            types = [str(t) for t in settings_of(acc).get("purchase_types") or [] if str(t)]
+            per_type = None
+            if retryable(e) and types:
+                with contextlib.suppress(BotApiError):
+                    per_type = await c.transactions(limit=5, tx_type=types[0])
+            if per_type is not None:
+                if per_type:
+                    fields["transactions"] = field_names(per_type)
+                checks.append(
+                    {
+                        "name": "transactions",
+                        "label": label,
+                        "ok": True,
+                        "message": (
+                            f"گزارش کامل تراکنش‌ها در ربات خطا می‌دهد ({e.message})، ولی با فیلتر نوع خرید "
+                            f"({', '.join(types)}) کار می‌کند؛ فروش از همین راه خوانده می‌شود."
+                        ),
+                    }
+                )
+            else:
+                checks.append({"name": "transactions", "label": label, "ok": False, "message": e.friendly})
     acc.bot_fields = fields
     ok_count = sum(1 for c in checks if c["ok"])
     if ok_count == len(checks):
