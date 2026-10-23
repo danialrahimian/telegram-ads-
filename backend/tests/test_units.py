@@ -115,3 +115,14 @@ async def test_forced_trigger_reruns_after_the_running_sync(monkeypatch):
         await asyncio.sleep(0)
     assert calls == ["fast", "fast"]
     sch._loop_task.cancel()
+
+
+def test_user_growth_ignores_counter_resets():
+    from app.services.metrics import user_growth
+
+    assert user_growth([100, 101, 105, 105, 110]) == 10
+    # a different bot was connected: 101202 -> 50, then normal growth
+    assert user_growth([101150, 101202, 50, 101, 159]) == 52 + 51 + 58
+    # and the other way round: a jump from a small to a big counter is not growth
+    assert user_growth([50, 101202, 101210]) == 8
+    assert user_growth([7]) == 0

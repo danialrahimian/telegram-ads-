@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
+from itertools import pairwise
 from typing import Any
 
 from sqlalchemy import and_, case, func, select
@@ -182,14 +183,34 @@ async def early_cps(
     return _ratio(float(r[0] or 0), float(r[1] or 0))
 
 
+def user_growth(counts: list[int]) -> int:
+    """New bot users from a series of `count_user` readings.
+
+    Sums the increases between consecutive readings. A drop, or a jump far too big for one sync interval,
+    means the counter changed meaning (another bot or key was connected), so that step is ignored.
+    """
+    total = 0
+    for prev, cur in pairwise(counts):
+        step = cur - prev
+        if 0 < step <= max(500, prev // 2):
+            total += step
+    return total
+
+
 async def _bot_new_users(s: AsyncSession, account_id: int, since_ts: int, until_ts: int | None = None) -> int | None:
-    q = select(func.min(AccountSnapshot.bot_users), func.max(AccountSnapshot.bot_users)).where(
-        AccountSnapshot.account_id == account_id, AccountSnapshot.ts >= since_ts, AccountSnapshot.bot_users.is_not(None)
+    q = (
+        select(AccountSnapshot.bot_users)
+        .where(
+            AccountSnapshot.account_id == account_id,
+            AccountSnapshot.ts >= since_ts,
+            AccountSnapshot.bot_users.is_not(None),
+        )
+        .order_by(AccountSnapshot.ts)
     )
     if until_ts:
         q = q.where(AccountSnapshot.ts < until_ts)
-    lo, hi = (await s.execute(q)).one()
-    return int(hi - lo) if lo is not None and hi is not None else None
+    counts = [int(x) for x in (await s.execute(q)).scalars() if x is not None]
+    return user_growth(counts) if counts else None
 
 
 async def _sales_window(s: AsyncSession, acc: Account, since_ts: int, until_ts: int) -> dict[str, Any]:
@@ -363,17 +384,16 @@ async def daily(s: AsyncSession, acc: Account, days: int = 60) -> list[dict[str,
         .where(AccountSnapshot.account_id == acc.id, AccountSnapshot.bot_users.is_not(None))
         .order_by(AccountSnapshot.ts)
     )
-    per_day: dict[str, list[int]] = {}
+    per_day: dict[str, list[int]] = defaultdict(list)
+    last: int | None = None
     for ts, users in snaps:
         d = datetime.fromtimestamp(int(ts), tz).date().isoformat()
-        n = int(users or 0)
-        per_day.setdefault(d, [n, n])
-        per_day[d][1] = n
-    prev_end: int | None = None
-    for d in sorted(per_day):
-        lo, hi = per_day[d]
-        new_users[d] = hi - (prev_end if prev_end is not None else lo)
-        prev_end = hi
+        if not per_day[d] and last is not None:
+            per_day[d].append(last)  # count growth across midnight into the new day
+        per_day[d].append(int(users or 0))
+        last = int(users or 0)
+    for d, counts in per_day.items():
+        new_users[d] = user_growth(counts)
     out = []
     for i in range(days):
         d = (since + timedelta(days=i)).isoformat()
@@ -436,7 +456,9 @@ async def live(s: AsyncSession, acc: Account) -> dict[str, Any]:
         "starts": (last[4] - base[4]) if last and base else 0,
         "clicks": (last[3] - base[3]) if last and base else 0,
         "views": (last[2] - base[2]) if last and base else 0,
-        "new_users": (last[5] - base[5]) if last and base and last[5] is not None and base[5] is not None else None,
+        "new_users": user_growth([int(r[5]) for r in [base, *[x for x in snaps if x[0] > base[0]]] if r[5] is not None])
+        if last and base and last[5] is not None
+        else None,
     }
     return {"today": today, "points": points, "since_ts": start_ts}
 
