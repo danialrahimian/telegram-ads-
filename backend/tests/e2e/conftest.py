@@ -52,6 +52,19 @@ class Stack:
     def add_user(self, key: str, referrer: str) -> None:
         httpx.post(f"http://127.0.0.1:{self.bot}/__test/add_user", json={"key": key, "referrer": referrer})
 
+    def _tg(self, path: str, body: dict) -> object:
+        return httpx.post(f"http://127.0.0.1:{self.tg}/__test/{path}", json=body).json()["result"]
+
+    def review(self, key: str = "a", ad_id: int | None = None, decision: str = "approve") -> object:
+        """Play Telegram's moderators: approve (or decline) ads waiting in review."""
+        return self._tg("review", {"key": key, "ad_id": ad_id, "decision": decision})
+
+    def set_ad(self, key: str, ad_id: int, **fields: object) -> None:
+        self._tg("set_ad", {"key": key, "ad_id": ad_id, "fields": fields})
+
+    def set_balance(self, key: str, amount: float) -> None:
+        self._tg("set_balance", {"key": key, "amount": amount})
+
 
 @pytest.fixture(scope="session")
 def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:

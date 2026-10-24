@@ -46,6 +46,13 @@ class Ad(Base):
     note: Mapped[str] = mapped_column(Text, default="")
     created_by_app: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Budget history (see services/budget.py): start of the current funded stretch, or since when it is empty.
+    funded_since_ts: Mapped[int] = mapped_column(Integer, default=0)
+    empty_since_ts: Mapped[int] = mapped_column(Integer, default=0)
+    # Retired by a bulk replacement: stopped, no budget, hidden from the default lists.
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_ts: Mapped[int] = mapped_column(Integer, default=0)
+
 
 class AdStat(Base):
     __tablename__ = "ad_stats"
@@ -59,3 +66,22 @@ class AdStat(Base):
     clicks: Mapped[int] = mapped_column(Integer, default=0)
     actions: Mapped[int] = mapped_column(Integer, default=0)
     spent: Mapped[float] = mapped_column(Float, default=0)
+
+
+class AdBudgetEvent(Base):
+    """A change of an ad's remaining budget: funded (from empty), empty, topup or withdraw.
+
+    `actor` is "app" for changes the panel made, "site" for jumps nobody here caused (a top-up on
+    ads.telegram.org) and "sync" for transitions observed by the periodic sync (spent down to zero).
+    """
+
+    __tablename__ = "ad_budget_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    ad_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    ts: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # funded | empty | topup | withdraw
+    amount: Mapped[float] = mapped_column(Float, default=0)
+    remaining: Mapped[float] = mapped_column(Float, default=0)  # remaining budget after the change
+    actor: Mapped[str] = mapped_column(String(16), default="sync")

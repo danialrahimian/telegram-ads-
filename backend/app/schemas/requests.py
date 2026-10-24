@@ -79,7 +79,7 @@ class AdCreateIn(StrictModel):
 
 
 class ApproveKindIn(StrictModel):
-    kind: Literal["stop", "withdraw", "topup"]
+    kind: Literal["stop", "withdraw", "topup", "refill"]
 
 
 class TextIn(StrictModel):
@@ -121,3 +121,40 @@ class AnalysisIn(StrictModel):
 
 class KillIn(StrictModel):
     confirm: str
+
+
+class PerAdText(StrictModel):
+    text: str = Field(max_length=400)
+
+
+class BulkIn(StrictModel):
+    kind: Literal["content", "referral", "replace"]
+    ad_ids: list[int] = Field(min_length=1, max_length=500)
+    mode: Literal["replace", "inplace"] = "replace"
+    text: str | None = Field(None, max_length=400)
+    variant_id: int | None = None
+    per_ad: dict[int, PerAdText] | None = None
+    photo_id: str | None = Field(None, max_length=200)
+    photo_name: str | None = Field(None, max_length=120)
+    budget_source: Literal["account", "transfer"] = "transfer"
+    initial_budget: float | None = Field(None, ge=0)
+    topup_after_withdraw: bool = False
+    group_by: Literal["target", "cpm", "placement"] = "target"
+    proposal_ids: list[int] | None = None
+    confirm: bool = False
+
+
+class ResubmitIn(StrictModel):
+    text: str = Field(max_length=400)
+
+
+class TextCheckIn(StrictModel):
+    text: str = Field(max_length=1000)
+    promote_url: str | None = Field(None, max_length=300)
+    ad_id: int | None = None
+
+
+class TextFixIn(StrictModel):
+    text: str = Field(max_length=1000)
+    reason: str = Field("", max_length=1000)
+    ad_id: int | None = None

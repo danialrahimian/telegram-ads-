@@ -15,10 +15,12 @@ from app.schemas.requests import (
     TagIn,
     TagUpdateIn,
     TextAnalyzeIn,
+    TextCheckIn,
+    TextFixIn,
     TextIn,
     TextUpdateIn,
 )
-from app.services import accounts, actions, analysis, metrics, referrals, rules, texts
+from app.services import accounts, actions, analysis, guidelines, metrics, referrals, rules, texts
 
 router = APIRouter(prefix="/accounts/{slug}", dependencies=[Auth])
 
@@ -29,12 +31,12 @@ router = APIRouter(prefix="/accounts/{slug}", dependencies=[Auth])
 @router.get("/proposals", tags=["proposals"])
 async def list_proposals(acc: AccountDep, s: Session) -> dict:
     labels = {
-        a.ad_id: (a.target_label, a.placement, a.title)
+        a.ad_id: (a.target_label, a.placement, a.title, a.text, a.has_photo)
         for a in (await s.execute(select(Ad).where(Ad.account_id == acc.id))).scalars()
     }
 
     def row(p: Proposal) -> dict:
-        lab = labels.get(p.ad_id, ("", "", ""))
+        lab = labels.get(p.ad_id, ("", "", "", "", False))
         return {
             "id": p.id,
             "ad_id": p.ad_id,
@@ -50,6 +52,8 @@ async def list_proposals(acc: AccountDep, s: Session) -> dict:
             "target_label": lab[0],
             "placement": lab[1],
             "title": lab[2],
+            "text": lab[3],
+            "has_photo": lab[4],
         }
 
     pending = (
@@ -141,6 +145,25 @@ async def create_text(body: TextIn, acc: AccountDep, s: Session) -> dict:
     v = await texts.create(s, acc, body.name, body.text)
     await s.commit()
     return texts.public(v)
+
+
+@router.post("/texts/check", tags=["texts"])
+async def check_text(body: TextCheckIn, acc: AccountDep, s: Session) -> dict:
+    """Telegram ad-guideline check of a text (length, emoji, urgency, links...)."""
+    url = body.promote_url
+    if body.ad_id and not url:
+        url = (
+            await s.execute(select(Ad.promote_url).where(Ad.account_id == acc.id, Ad.ad_id == body.ad_id))
+        ).scalar_one_or_none()
+    return guidelines.check(body.text, promote_url=url)
+
+
+@router.post("/texts/fix", tags=["texts"])
+async def fix_text(body: TextFixIn, acc: AccountDep, s: Session) -> dict:
+    """Claude rewrites the text to follow the guidelines; the user edits the result before using it."""
+    result = await texts.rewrite_compliant(s, acc, body.text, reason=body.reason, ad_id=body.ad_id)
+    await s.commit()
+    return result
 
 
 @router.post("/texts/import", tags=["texts"])

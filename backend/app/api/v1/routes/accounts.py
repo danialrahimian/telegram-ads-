@@ -5,10 +5,11 @@ from fastapi.responses import Response
 from sqlalchemy import func, select
 
 from app.api.deps import AccountDep, Auth, Session
+from app.core import crypto
 from app.core.errors import AppError
 from app.models import Job, Proposal
 from app.schemas.requests import AccountCreateIn, AccountUpdateIn, BotConnectionIn, KillIn, SyncIn, TelegramTokenIn
-from app.services import accounts, actions, analysis, app_settings, metrics, sync
+from app.services import accounts, actions, analysis, app_settings, bot_diag, metrics, sync
 from app.workers.scheduler import KINDS, scheduler
 
 router = APIRouter(prefix="/accounts", tags=["accounts"], dependencies=[Auth])
@@ -107,6 +108,30 @@ async def check_bot(acc: AccountDep, s: Session) -> dict:
     result = await accounts.check_bot(s, acc)
     await s.commit()
     return {"check": result, "account": await _public(s, acc)}
+
+
+async def _secrets(s: Session, acc: AccountDep) -> list[str]:
+    return [
+        crypto.decrypt(acc.bot_api_key_enc) or "",
+        crypto.decrypt(acc.tg_token_enc) or "",
+        await app_settings.claude_key(s) or "",
+    ]
+
+
+@router.post("/{slug}/bot/diagnose")
+async def diagnose_bot(acc: AccountDep, s: Session) -> dict:
+    """Try every request the panel needs, one by one, and explain each failure (no key in the result)."""
+    report = await bot_diag.diagnose(s, acc)
+    await s.commit()
+    return {"report": report, "text": bot_diag.report_text(report, await _secrets(s, acc))}
+
+
+@router.get("/{slug}/bot/diagnose")
+async def last_diagnosis(acc: AccountDep, s: Session) -> dict:
+    report = (acc.sync_state or {}).get("bot_diag")
+    if not report:
+        return {"report": None, "text": ""}
+    return {"report": report, "text": bot_diag.report_text(report, await _secrets(s, acc))}
 
 
 # ---- sync & live data ----

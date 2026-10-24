@@ -1,6 +1,8 @@
 """Referral tags: referrer accounts in the sales bot whose invite links are used as ad links."""
 
 import re
+from collections import defaultdict
+from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError, Conflict, NotFound
 from app.db.base import now_ts
 from app.models import Account, Ad, BotUser, ReferralTag
-from app.services import events
+from app.services import accounts, events
+from app.services.accounts import settings_of
 
 CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 ID_RE = re.compile(r"^\d{3,20}$")
@@ -107,3 +110,140 @@ async def delete(s: AsyncSession, acc: Account, tag_id: int) -> None:
     tag = await get(s, acc, tag_id)
     await s.delete(tag)
     events.log(s, "tag_deleted", account_id=acc.id, actor="user", detail=tag.name)
+
+
+# ---------------------------------------------------------------- referrer pool (bulk referral links)
+
+
+async def tags_by_referrer(s: AsyncSession, acc: Account) -> dict[str, ReferralTag]:
+    return {
+        t.referrer_id: t
+        for t in (await s.execute(select(ReferralTag).where(ReferralTag.account_id == acc.id))).scalars()
+    }
+
+
+async def pool_status(s: AsyncSession, acc: Account) -> list[dict[str, Any]]:
+    """Each referrer of the pool: its tag (if any), how many live ads use it, and the last check."""
+    pool = [str(x) for x in settings_of(acc).get("referrer_pool") or []]
+    tags = await tags_by_referrer(s, acc)
+    use: dict[int, int] = defaultdict(int)
+    for (tag_id,) in await s.execute(
+        select(Ad.tag_id).where(
+            Ad.account_id == acc.id, Ad.gone.is_(False), Ad.archived.is_(False), Ad.tag_id.is_not(None)
+        )
+    ):
+        use[int(tag_id or 0)] += 1
+    checks = (acc.sync_state or {}).get("pool_checks") or {}
+    out = []
+    for rid in pool:
+        tag = tags.get(rid)
+        ads = use.get(tag.id, 0) if tag else 0
+        out.append(
+            {
+                "referrer_id": rid,
+                "tag_id": tag.id if tag else None,
+                "tag_name": tag.name if tag else None,
+                "ads": ads,
+                "free": ads == 0,
+                "check": checks.get(rid),
+            }
+        )
+    return out
+
+
+async def check_pool(acc: Account) -> dict[str, dict[str, Any]]:
+    """Confirm each pool referrer exists in the bot (users → user) and count who it already invited."""
+    pool = [str(x) for x in settings_of(acc).get("referrer_pool") or []]
+    out: dict[str, dict[str, Any]] = {}
+    for rid in pool:
+        res = await accounts.lookup_referrer(acc, rid)
+        out[rid] = {
+            "exists": bool(res.get("ok")),
+            "invited": res.get("referred"),
+            "error": res.get("error") or res.get("warning") or "",
+            "ts": now_ts(),
+        }
+    return out
+
+
+def _group_key(r: dict[str, Any], group_by: str) -> str:
+    if group_by == "cpm":
+        return f"CPM {r['cpm']:g}"
+    if group_by == "placement":
+        return {"channel_post": "کانال", "bot_banner": "ربات"}.get(r["placement"], r["placement"] or "—")
+    return r["target_label"] or f"#{r['ad_id']}"
+
+
+def _join_labels(labels: list[str]) -> str:
+    head = "، ".join(labels[:2])
+    return head + (f" و {len(labels) - 2} گروه دیگر" if len(labels) > 2 else "")
+
+
+def assign(
+    rows: list[dict[str, Any]], pool: list[dict[str, Any]], group_by: str = "target"
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Give each ad a free referrer; with fewer referrers than ads, group the ads (by target channel/bot,
+    CPM or placement) and give each group one referrer, balancing the group sizes.
+
+    Returns (assignments [{referrer_id, tag_id, label, ad_ids}], warnings).
+    """
+    free = [p for p in pool if p["free"] and (p.get("check") or {}).get("exists", True)]
+    warnings: list[str] = []
+    if not rows:
+        return [], warnings
+    if not free:
+        return [], ["معرف آزادی در استخر نیست؛ در تنظیمات حساب، شناسه‌ی حساب‌های معرفِ خودتان را اضافه کنید."]
+    for p in free:
+        invited = (p.get("check") or {}).get("invited")
+        if invited:
+            warnings.append(
+                f"معرف {p['referrer_id']} از قبل {invited} دعوت دارد؛ آمار آگهی‌هایش با دعوت‌های قبلی مخلوط می‌شود."
+            )
+    if len(free) >= len(rows):
+        return [
+            {
+                "referrer_id": p["referrer_id"],
+                "tag_id": p["tag_id"],
+                "label": _group_key(r, "target"),
+                "ad_ids": [r["ad_id"]],
+            }
+            for p, r in zip(free, rows, strict=False)
+        ], warnings
+    groups: dict[str, list[int]] = defaultdict(list)
+    for r in rows:
+        groups[_group_key(r, group_by)].append(r["ad_id"])
+    buckets: list[dict[str, Any]] = [
+        {"referrer_id": p["referrer_id"], "tag_id": p["tag_id"], "labels": [], "ad_ids": []} for p in free
+    ]
+    for label, ids in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        b = min(buckets, key=lambda x: len(x["ad_ids"]))
+        b["labels"].append(label)
+        b["ad_ids"].extend(ids)
+    out = [
+        {
+            "referrer_id": b["referrer_id"],
+            "tag_id": b["tag_id"],
+            "label": _join_labels(b["labels"]),
+            "ad_ids": b["ad_ids"],
+        }
+        for b in buckets
+        if b["ad_ids"]
+    ]
+    warnings.append(
+        f"{len(free)} معرف آزاد برای {len(rows)} آگهی هست؛ آگهی‌ها گروه‌بندی شدند و آگهی‌های هر گروه برچسب مشترک می‌گیرند. "
+        "فروش برچسب مشترک بین آگهی‌هایش تقسیم نمی‌شود و فقط برای کل گروه دیده می‌شود."
+    )
+    return out, warnings
+
+
+async def ensure_tag(s: AsyncSession, acc: Account, referrer_id: str, label: str) -> ReferralTag:
+    """The tag of a pool referrer, created on first use. Its start code is the referrer's numeric id:
+    the bot attributes a new user only when `start` is the id of an existing user."""
+    tag = (
+        await s.execute(
+            select(ReferralTag).where(ReferralTag.account_id == acc.id, ReferralTag.referrer_id == referrer_id)
+        )
+    ).scalar_one_or_none()
+    if tag is not None:
+        return tag
+    return await create(s, acc, f"رفرال {label}"[:80], referrer_id, referrer_id, note="ساخته‌شده با عملیات گروهی")

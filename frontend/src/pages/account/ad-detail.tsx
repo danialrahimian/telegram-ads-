@@ -1,4 +1,4 @@
-import { ArrowRightIcon, ExternalLinkIcon, PencilIcon, TagIcon } from "lucide-react";
+import { ArchiveIcon, ArrowRightIcon, ExternalLinkIcon, LayersIcon, PencilIcon, TagIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { AdActions } from "@/components/ad-actions";
@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { budgetless } from "@/lib/bulk";
 import { date, dateTime, dayLabel, money, num, pct, toman } from "@/lib/format";
 import { accountApi, keys, useAction, useAd, useTags, useTexts } from "@/lib/queries";
 import type { AdRow } from "@/lib/types";
@@ -38,6 +39,22 @@ const JOB_STATUS: Record<string, { label: string; variant: "success" | "warning"
   failed: { label: "ناموفق", variant: "destructive" },
   cancelled: { label: "لغو شد", variant: "secondary" },
 };
+const JOB_KIND: Record<string, string> = {
+  topup: "شارژ",
+  withdraw: "برداشت",
+  pause: "توقف",
+  resume: "فعال‌سازی",
+  create_ad: "ساخت آگهی جایگزین",
+  edit_ad: "ویرایش آگهی",
+  delete_ad: "حذف آگهی",
+};
+const BUDGET_KIND: Record<string, string> = {
+  funded: "شارژ از صفر",
+  empty: "بودجه تمام شد",
+  topup: "شارژ",
+  withdraw: "برداشت",
+};
+const ACTOR: Record<string, string> = { app: "پنل", site: "سایت تلگرام", sync: "همگام‌سازی" };
 
 export function JobStatus({ status }: { status: string }) {
   const s = JOB_STATUS[status] ?? { label: status, variant: "secondary" as const };
@@ -67,6 +84,16 @@ export default function AdDetailPage() {
           <h1 className="flex flex-wrap items-center gap-2 text-xl font-bold">
             <span className="truncate">{ad.target_label || ad.title || `آگهی ${ad.ad_id}`}</span>
             <AdStatusBadge status={ad.status} paused={ad.is_paused} />
+            {budgetless(ad) && (
+              <Badge variant="warning">
+                <WalletIcon /> {budgetless(ad)}
+              </Badge>
+            )}
+            {ad.archived && (
+              <Badge variant="secondary">
+                <ArchiveIcon /> بایگانی‌شده
+              </Badge>
+            )}
           </h1>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span className="num">#{ad.ad_id}</span>
@@ -83,6 +110,24 @@ export default function AdDetailPage() {
           <AdActions account={account} ad={ad} />
         </div>
       </div>
+
+      {data.bulk.length > 0 && (
+        <Alert variant="info">
+          <LayersIcon />
+          <AlertTitle>در عملیات گروهی</AlertTitle>
+          <AlertDescription>
+            {data.bulk.map((b) => (
+              <p key={b.item_id}>
+                <Link className="underline" to={`/accounts/${account.slug}/bulk/${b.op_id}`}>
+                  عملیات #{b.op_id}
+                </Link>
+                {b.old_ad_id === ad.ad_id && b.new_ad_id ? ` — جایگزین: #${b.new_ad_id}` : ""}
+                {b.new_ad_id === ad.ad_id ? ` — جایگزین آگهی #${b.old_ad_id}` : ""}
+              </p>
+            ))}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {ad.decline_reason && (
         <Alert variant="destructive">
@@ -160,8 +205,8 @@ export default function AdDetailPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               {ad.tag_name ? (
-                <Badge variant="info">
-                  <TagIcon /> {ad.tag_name}
+                <Badge variant="info" className="max-w-full">
+                  <TagIcon /> <span className="truncate">{ad.tag_name}</span>
                 </Badge>
               ) : (
                 <Badge variant="secondary">بدون برچسب رفرال</Badge>
@@ -185,7 +230,7 @@ export default function AdDetailPage() {
               <div key={`j${j.id}`} className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2">
                 <div className="min-w-0">
                   <div className="font-medium">
-                    {j.kind === "topup" ? "شارژ" : j.kind === "withdraw" ? "برداشت" : j.kind === "pause" ? "توقف" : "فعال‌سازی"}
+                    {JOB_KIND[j.kind] ?? j.kind}
                     {j.amount ? <span className="num"> · {money(j.amount, cur)}</span> : null}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
@@ -209,6 +254,31 @@ export default function AdDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">تاریخچه‌ی بودجه</CardTitle>
+          <CardDescription>
+            قوانین فقط روزهایی را می‌سنجند که آگهی بودجه داشته؛ {num(ad.funded_days_28)} روز از ۲۸ روز اخیرِ دارای بودجه، هر استارت{" "}
+            {money(ad.cps_f28, cur)}.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-1.5 text-sm">
+          {data.budget_history.length === 0 && (
+            <p className="text-muted-foreground">هنوز تغییری در بودجه‌ی این آگهی دیده نشده است.</p>
+          )}
+          {data.budget_history.map((e, i) => (
+            <div key={i} className="flex flex-wrap items-center justify-between gap-2 rounded-md px-2 py-1.5 odd:bg-muted/40">
+              <span>
+                {BUDGET_KIND[e.kind] ?? e.kind} <span className="text-xs text-muted-foreground">({ACTOR[e.actor] ?? e.actor})</span>
+              </span>
+              <span className="num text-xs text-muted-foreground">
+                {money(e.amount, cur)} → {money(e.remaining, cur)} · {dateTime(e.ts)}
+              </span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
 
       {editing && <EditAdDialog ad={ad} onClose={() => setEditing(false)} />}
     </div>

@@ -150,7 +150,7 @@ async def test_two_accounts_are_isolated(api):
     await _sync_all("darvaze")
     a = (await api.get("/api/v1/accounts/psychonet/ads")).json()["ads"]
     b = (await api.get("/api/v1/accounts/darvaze/ads")).json()["ads"]
-    assert len(a) == 10 and len(b) == 4
+    assert len(a) == 12 and len(b) == 4
     assert {x["ad_id"] for x in a}.isdisjoint({x["ad_id"] for x in b})
     ov = (await api.get("/api/v1/overview")).json()["accounts"]
     assert [x["slug"] for x in ov] == ["psychonet", "darvaze"]
@@ -172,7 +172,12 @@ async def test_sync_rules_and_actions(api, tg_mock):
     assert by_title.get("expensive") == "stop" and by_title.get("slow_expensive") == "stop"
     assert by_title.get("good_low_budget") == "topup" and by_title.get("good_bot_low_budget") == "topup"
     assert by_title.get("fatigued") == "refresh"
+    assert by_title.get("refill_gap") == "refill" and by_title.get("declined_text") == "replace"
     assert not {"good_plenty", "old_stopped", "new_in_review"} & set(by_title)
+    refill = next(p for p in props["pending"] if p["title"] == "refill_gap")
+    assert "20 روز است بودجه ندارد" in refill["reason"] and refill["amount"] == 1.0
+    replace = next(p for p in props["pending"] if p["title"] == "declined_text")
+    assert "Misleading urgency" in replace["reason"]
 
     # reject -> not proposed again on the next run
     fat = next(p for p in props["pending"] if p["title"] == "fatigued")
@@ -201,7 +206,7 @@ async def test_sync_rules_and_actions(api, tg_mock):
         props_db = (
             (await s.execute(select(Proposal).where(Proposal.status.in_(("approved", "pending"))))).scalars().all()
         )
-        assert all(p.kind == "refresh" for p in props_db if p.status == "pending")
+        assert {p.kind for p in props_db if p.status == "pending"} <= {"refresh", "refill", "replace"}
     acct = tg_mock.accounts["a"]
     for ad_id in (4, 5, 6, 7):  # withdrawn/stopped ads are paused with nothing left
         assert acct["ads"][ad_id]["is_paused"] and acct["ads"][ad_id]["remaining_budget"] == 0
@@ -373,10 +378,10 @@ async def test_texts_and_claude(api):
     assert r.status_code == 201
     vid = r.json()["id"]
     imported = (await api.post("/api/v1/accounts/psychonet/texts/import")).json()["imported"]
-    assert imported == 1
+    assert imported == 2  # the shared test text and the declined ad's text
     texts = (await api.get("/api/v1/accounts/psychonet/texts")).json()["texts"]
-    imported_text = next(t for t in texts if t["source"] == "imported")
-    assert imported_text["performance"]["ads"] == 10
+    imported_text = next(t for t in texts if t["source"] == "imported" and t["text"] == "متن آزمایشی آگهی 👇")
+    assert imported_text["performance"]["ads"] == 11
     # Claude without a key
     r = await api.post(f"/api/v1/accounts/psychonet/texts/{vid}/analyze", json={})
     assert r.status_code == 400 and r.json()["code"] == "claude_error"

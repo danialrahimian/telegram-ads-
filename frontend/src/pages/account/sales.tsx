@@ -1,4 +1,4 @@
-import { InfoIcon, PencilIcon, PlusIcon, SearchCheckIcon, TagIcon, Trash2Icon } from "lucide-react";
+import { InfoIcon, LinkIcon, PencilIcon, PlusIcon, SearchCheckIcon, TagIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { ConfirmButton } from "@/components/confirm-button";
@@ -109,7 +109,22 @@ export default function SalesPage() {
           </TabsList>
         </Tabs>
       </div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {!!data?.overview.untagged_ads && (
+        <Alert variant="warning">
+          <LinkIcon />
+          <AlertTitle>{num(data.overview.untagged_ads)} آگهی برچسب رفرال ندارد</AlertTitle>
+          <AlertDescription>
+            <p>
+              با یک عملیات گروهی به هر کدام یک معرف آزاد از استخر معرف‌ها (تنظیمات حساب) داده می‌شود و لینکش عوض می‌شود. قبل از
+              اجرا پیش‌نمایش می‌بینید.
+            </p>
+            <Button asChild size="sm" className="mt-2">
+              <Link to={`/accounts/${account.slug}/ads?tag=none&select=all&bulk=referral`}>ساخت برچسب برای همه</Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatCard label="تعداد خرید" value={num(totals.count)} loading={isLoading} hint={`${num(days)} روز اخیر`} />
         <StatCard label="مبلغ خرید" value={toman(totals.amount)} loading={isLoading} />
         <StatCard
@@ -117,6 +132,13 @@ export default function SalesPage() {
           value={num(tags.reduce((a, t) => a + t.users, 0))}
           loading={isLoading}
           hint="همه‌ی زمان‌ها"
+        />
+        <StatCard
+          label="آگهی‌های بدون برچسب"
+          value={num(data?.overview.untagged_ads)}
+          loading={isLoading}
+          tone={data?.overview.untagged_ads ? "bad" : undefined}
+          hint="فروششان جدا شمرده نمی‌شود"
         />
         <StatCard
           label="تراکنش ذخیره‌شده"

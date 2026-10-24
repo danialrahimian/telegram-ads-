@@ -1,7 +1,11 @@
 """In-memory fake of the Telegram Ads API with made-up data (no real accounts, no real money).
 
-Two tokens are known: "mocktoken-a" (10 ads covering every rule) and "mocktoken-b" (4 ads).
+Two tokens are known: "mocktoken-a" (12 ads covering every rule) and "mocktoken-b" (4 ads).
 The same object backs the pytest respx routes and the HTTP server used by the e2e tests.
+
+What the real API does for deleting an ad or changing a live ad's photo is not public, so both are
+switches: `supports_delete` (default off: unknown method, like an API without deleteAd) and
+`supports_photo_edit` (default on). `review()` plays Telegram's moderators for ads in review.
 """
 
 import json
@@ -25,7 +29,18 @@ SCENARIOS_A = [
     ("fatigued", "channel_post", 0.45, 45, 100, 30, 0.05, 0, 2.0, ""),
     ("new_in_review", "channel_post", 0.45, 0, 0, 0, 0, 0, 1.0, ""),
     ("old_stopped", "channel_post", 0.45, 120, 50, 50, 0.08, 60, 0.0, ""),
+    # Good ad that had no budget for the last 20 days (spend stopped when the money ran out).
+    ("refill_gap", "channel_post", 0.45, 60, 90, 90, 0.05, 20, 0.0, ""),
+    # Declined by Telegram for its text.
+    ("declined_text", "channel_post", 0.45, 0, 0, 0, 0, 0, 1.0, ""),
 ]
+EXTRA = {
+    "declined_text": {
+        "status": "declined",
+        "text": "🔥🔥 فقط تا آخر امشب!!! تخفیف ویژه 🔥",
+        "decline_reason": {"text": "Misleading urgency and excessive emoji"},
+    },
+}
 SCENARIOS_B = [
     ("darvaze_main", "channel_post", 0.4, 30, 60, 60, 0.05, 0, 1.5, "ref_b1"),
     ("darvaze_bot", "bot_banner", 0.5, 30, 40, 40, 0.04, 0, 0.8, ""),
@@ -36,8 +51,17 @@ BOT_USERNAME = {"a": "psychonet_test_bot", "b": "darvaze_test_bot"}
 
 
 class TgAdsMock:
-    def __init__(self, inactive_seconds: float = 3.0, seed: int = 7) -> None:
+    def __init__(
+        self,
+        inactive_seconds: float = 3.0,
+        seed: int = 7,
+        *,
+        supports_delete: bool = False,
+        supports_photo_edit: bool = True,
+    ) -> None:
         self.inactive_seconds = inactive_seconds
+        self.supports_delete = supports_delete
+        self.supports_photo_edit = supports_photo_edit
         self.lock = threading.Lock()
         self.accounts: dict[str, dict[str, Any]] = {}
         self.calls: list[tuple[str, str]] = []
@@ -67,6 +91,7 @@ class TgAdsMock:
                 for k, v in (("views", views), ("clicks", clicks), ("actions", starts), ("spent", sp)):
                     tot[k] += v
             status = "in_review" if "review" in name else "stopped" if name == "old_stopped" else "active"
+            extra = EXTRA.get(name, {})
             tkey = "bots" if placement == "bot_banner" else "channels"
             url = f"https://t.me/{BOT_USERNAME[key]}" + (f"?start={start}" if start else "")
             ads[ad_id] = {
@@ -87,6 +112,7 @@ class TgAdsMock:
                 "created_date": int(datetime.combine(created, datetime.min.time(), UTC).timestamp()),
                 "target": {"type": tkey, tkey: [{"username": f"sample_{name}", "title": name}]},
             }
+            ads[ad_id].update({**extra, "status": extra.get("status", status)})
             stats[ad_id] = rows
         spent = round(sum(a["spent_budget"] for a in ads.values()), 5)
         return {
@@ -104,6 +130,31 @@ class TgAdsMock:
             "idem": {},
             "next_id": base_id + 900,
         }
+
+    # ------------------------------------------------------------------ test helpers
+    def review(self, key: str, ad_id: int | None = None, decision: str = "approve", reason: str = "") -> list[int]:
+        """Approve or decline ads in review (one, or all of the account). Returns the ad ids changed."""
+        with self.lock:
+            done = []
+            for a in self.accounts[key]["ads"].values():
+                if a["status"] != "in_review" or (ad_id is not None and a["ad_id"] != ad_id):
+                    continue
+                if decision == "approve":
+                    a["status"] = "active"
+                    a.pop("decline_reason", None)
+                else:
+                    a["status"] = "declined"
+                    a["decline_reason"] = {"text": reason or "Ad text violates the guidelines"}
+                done.append(a["ad_id"])
+            return done
+
+    def set_ad(self, key: str, ad_id: int, **fields: Any) -> None:
+        with self.lock:
+            self.accounts[key]["ads"][ad_id].update(fields)
+
+    def set_balance(self, key: str, amount: float) -> None:
+        with self.lock:
+            self.accounts[key]["account"]["remaining_budget"] = amount
 
     # ------------------------------------------------------------------ dispatch
     def handle(
@@ -160,9 +211,15 @@ class TgAdsMock:
                     )
             return out
         if method == "editAd":
+            if "photo_id" in p and self.supports_photo_edit and not str(p["photo_id"]).startswith("ph_"):
+                raise KeyError("PHOTO_ID_INVALID")
             a = ads.get(int(p["ad_id"]))
             if not a:
                 raise KeyError("AD_ID_INVALID")
+            if "photo_id" in p and self.supports_photo_edit:
+                a["photo"] = {"photo_id": p["photo_id"]}
+                a["status"] = "in_review"
+                a.pop("decline_reason", None)
             if "is_paused" in p:
                 paused = p["is_paused"] in (True, "true", "True", 1, "1")
                 a["is_paused"] = paused
@@ -176,7 +233,18 @@ class TgAdsMock:
                         raise KeyError("AD_TEXT_TOO_LONG")
                     a[k] = p[k]
                     a["status"] = "in_review"
+                    a.pop("decline_reason", None)
             return a
+        if method == "deleteAd" and self.supports_delete:
+            if "ad_id" not in p:
+                raise KeyError("AD_ID_REQUIRED")
+            a = ads.get(int(p["ad_id"]))
+            if not a:
+                raise KeyError("AD_ID_INVALID")
+            if a["remaining_budget"] > 0:
+                raise KeyError("AD_BUDGET_NOT_EMPTY")
+            del ads[a["ad_id"]]
+            return True
         if method == "decreaseAdBudget":
             a = ads[int(p["ad_id"])]
             paused_at = st["paused_at"].get(a["ad_id"], time.time())

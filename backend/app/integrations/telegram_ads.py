@@ -179,3 +179,42 @@ class TelegramAdsClient:
 
     async def create_ad(self, key: str, **params: Any) -> dict[str, Any]:
         return await self.call("createAd", idempotency_key=key, **params)
+
+    async def delete_ad(self, ad_id: int) -> Any:
+        """Only called after probe_capabilities() found the method (see services/bulk.py)."""
+        return await self.call("deleteAd", ad_id=ad_id)
+
+    async def probe_capabilities(self) -> dict[str, str]:
+        """Find out, without touching any ad, whether deleting ads and changing a live ad's photo exist.
+
+        The public documentation is behind a login, so nothing is assumed:
+          * deleteAd is called with an empty body. No ad id means nothing can be deleted; an unknown
+            method answers differently from a known method that misses its parameter.
+          * editAd is called for ad 0 (never a real ad) with an invalid photo id. A photo error shows the
+            parameter is understood; any other answer leaves it "unknown" (a real one-ad test settles it).
+        Values: "yes" | "no" | "unknown".
+        """
+        out = {"delete_ad": "unknown", "edit_photo": "unknown"}
+        try:
+            await self.call("deleteAd")
+            out["delete_ad"] = "yes"
+        except TelegramAdsError as e:
+            out["delete_ad"] = classify_probe(e)
+        try:
+            await self.call("editAd", ad_id=0, photo_id="probe-invalid")
+            out["edit_photo"] = "unknown"
+        except TelegramAdsError as e:
+            err = e.error.upper()
+            out["edit_photo"] = "yes" if "PHOTO" in err else "unknown"
+        return out
+
+
+def classify_probe(e: TelegramAdsError) -> str:
+    err = e.error.upper()
+    if e.http_status == 404 or "METHOD" in err:
+        return "no"
+    if err.startswith("AD_") or err.endswith("_REQUIRED") or err.endswith("_INVALID") or "PARAM" in err:
+        return "yes"
+    if "NOT_FOUND" in err or "UNKNOWN" in err:
+        return "no"
+    return "unknown"

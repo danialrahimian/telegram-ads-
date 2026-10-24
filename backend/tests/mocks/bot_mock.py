@@ -10,7 +10,19 @@ import threading
 from datetime import datetime, timedelta
 from typing import Any
 
-KEYS = {"botkey-a": "a", "botkey-b": "b", "botkey-limited": "a", "botkey-crash": "b"}
+KEYS = {
+    "botkey-a": "a",
+    "botkey-b": "b",
+    "botkey-limited": "a",
+    "botkey-crash": "b",
+    "botkey-500": "a",
+    "botkey-echo": "a",
+    "botkey-otherbot": "b",
+}
+# "botkey-500": statbot works, every /api/users action dies with an HTTP 500 PHP error page.
+# "botkey-echo": like botkey-500, but the error page repeats the Token header (the key must never leak).
+# "botkey-otherbot": the key of bot B used in account A (setting_info reports another username).
+BOT_NAMES = {"a": "psychonet_test_bot", "b": "darvaze_test_bot"}
 # "botkey-crash" reproduces what the real (subscription) bot did: the unfiltered ledger fails with an
 # HTTP 500 and a non-JSON body, while the documented per-type query is assumed to work; referrals as obj.users.
 RAW = "__raw__"
@@ -85,10 +97,22 @@ class BotMock:
             d = self.data[key]
             if path == "/api/statbot":
                 return 200, {"count_user": d["count_user"], "count_invoice": len(d["txs"]), "count_agent": 3}
+            if path == "/api/settings" and action == "setting_info":
+                return 200, {
+                    "status": True,
+                    "msg": "Successful",
+                    "obj": {"username_bot": BOT_NAMES[key], "status": "on"},
+                }
+            if path == "/api/invoice" and action == "invoices":
+                return 200, {"status": True, "msg": "Successful", "obj": []}
             if path != "/api/users":
                 return 200, {"status": False, "msg": "Action Invalid", "obj": []}
             if token == "botkey-limited":
                 return 403, {"status": False, "msg": "access denied", "obj": []}
+            if token == "botkey-500":
+                return 500, {RAW: PHP_FATAL}
+            if token == "botkey-echo":
+                return 500, {RAW: f"<b>Fatal error</b>: bad request, headers: Token: {token}; key={token}"}
             if method != "GET":
                 return 200, {"status": False, "msg": "method invalid", "obj": []}
             page = max(1, int(body.get("page") or 1))

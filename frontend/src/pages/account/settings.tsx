@@ -5,6 +5,7 @@ import {
   CheckIcon,
   CircleXIcon,
   KeyRoundIcon,
+  LinkIcon,
   OctagonXIcon,
   RefreshCwIcon,
   SaveIcon,
@@ -16,6 +17,7 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
+import { BotDiagnostics } from "@/components/bot-diagnostics";
 import { CopyButton } from "@/components/copy-button";
 import { Field } from "@/components/field";
 import { HealthBadge } from "@/components/health";
@@ -37,9 +39,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { api, errorMessage } from "@/lib/api";
 import { ago, money, num, seconds } from "@/lib/format";
-import { accountApi, keys, useAction, useSystem } from "@/lib/queries";
+import { accountApi, keys, useAction, useSystem, useTracking } from "@/lib/queries";
 import type { Account, AccountSettings, BotCheck, TelegramCheck } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { COLORS } from "../account-new";
@@ -78,6 +81,21 @@ export default function AccountSettingsPage() {
           { key: "stalled_min_age_days", label: "حداقل عمر آگهی برای برداشت (روز)", step: 1 },
           { key: "fatigue_age_days", label: "حداقل عمر برای تشخیص خستگی (روز)", step: 1 },
           { key: "fatigue_ratio", label: "نسبت افت برای خستگی (مثلاً ۱٫۵ برابر گران‌تر)", step: 0.1 },
+          { key: "refill_max_empty_days", label: "حداکثر روزهای بی‌بودجه برای پیشنهاد شارژ دوباره", step: 1 },
+          { key: "replace_zero_view_days", label: "روزهای پیاپی بدون نمایش (با بودجه) = پیشنهاد جایگزینی", step: 1 },
+        ]}
+      />
+      <TrackingCard account={account} />
+      <SettingsGroup
+        id="bulk"
+        account={account}
+        title="عملیات گروهی"
+        description="برای اینکه محدودیت نرخ تلگرام نخورد و همه‌ی آگهی‌ها هم‌زمان به بررسی نروند، آگهی‌ها دسته‌دسته فرستاده می‌شوند."
+        fields={[
+          { key: "bulk_batch_size", label: "تعداد آگهی در هر دسته", step: 1 },
+          { key: "bulk_batch_interval_seconds", label: "فاصله‌ی دسته‌ها (ثانیه)", step: 10 },
+          { key: "bulk_max_in_review", label: "حداکثر آگهی هم‌زمان در بررسی", step: 1 },
+          { key: "bulk_min_budget", label: "بودجه‌ی اولیه‌ی آگهی جایگزین (حالت انتقال)", step: 0.01 },
         ]}
       />
       <div className="grid gap-5 xl:grid-cols-2">
@@ -362,6 +380,7 @@ function BotCard({ account }: { account: Account }) {
             </AlertDescription>
           </Alert>
         )}
+        {bot.configured && <BotDiagnostics account={account} />}
         {fieldList.length > 0 && (
           <details className="rounded-lg border px-3 py-2 text-xs">
             <summary className="cursor-pointer text-muted-foreground">فیلدهای شناسایی‌شده در پاسخ ربات</summary>
@@ -596,6 +615,120 @@ function BotSettingsCard({ account }: { account: Account }) {
           <SaveIcon /> ذخیره
         </Button>
       </CardFooter>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------- referral tracking (referrer pool)
+
+function TrackingCard({ account }: { account: Account }) {
+  const tracking = useTracking(account.slug);
+  const [ids, setIds] = useState(account.settings.referrer_pool.join("\n"));
+  const snapshot = account.settings.referrer_pool.join(",");
+  useEffect(() => setIds(account.settings.referrer_pool.join("\n")), [snapshot]); // eslint-disable-line react-hooks/exhaustive-deps
+  const base = accountApi(account.slug);
+  const parsed = ids
+    .split(/[\s,،]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const invalid = parsed.filter((x) => !/^\d{3,20}$/.test(x));
+  const save = useAction<void>({
+    fn: () => api.patch(base, { settings: { referrer_pool: parsed } }),
+    invalidate: [keys.acc(account.slug), keys.accounts],
+    success: "استخر معرف‌ها ذخیره شد.",
+  });
+  const check = useAction<void>({
+    fn: () => api.post(`${base}/tracking/pool/check`),
+    invalidate: [[...keys.acc(account.slug), "tracking"]],
+    success: "معرف‌ها در ربات بررسی شدند.",
+  });
+  const campaign = tracking.data?.modes.find((m) => m.key === "campaign");
+  return (
+    <Card id="tracking">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <LinkIcon className="size-4" /> ردیابی فروش هر آگهی
+        </CardTitle>
+        <CardDescription>
+          ربات فقط وقتی کاربر را به یک منبع نسبت می‌دهد که پارامتر start شناسه‌ی عددی یک کاربر موجود در ربات باشد. شناسه‌ی
+          مشتری‌های واقعی را اینجا نگذارید؛ ممکن است کمیسیون و پیام دعوت بگیرند.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="حالت ردیابی">
+          <div className="rounded-lg border border-primary bg-accent/50 p-3 text-sm" role="radio" aria-checked>
+            <div className="font-medium">استخر معرف‌ها (فعال)</div>
+            <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {tracking.data?.modes.find((m) => m.key === "pool")?.description}
+            </div>
+          </div>
+          <div className="rounded-lg border border-dashed p-3 text-sm opacity-80" role="radio" aria-checked={false} aria-disabled>
+            <div className="flex items-center gap-2 font-medium">
+              کد کمپین <Badge variant="secondary">نیاز به پشتیبانی ربات دارد</Badge>
+            </div>
+            <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {campaign?.description} نمونه: <span className="ltr">{tracking.data?.campaign_example}</span>
+            </div>
+            {tracking.data?.campaign_request && (
+              <div className="mt-2 flex items-center gap-1 text-xs">
+                <span className="text-muted-foreground">متن درخواست برای توسعه‌دهنده‌ی ربات</span>
+                <CopyButton value={tracking.data.campaign_request} label="کپی متن درخواست" />
+              </div>
+            )}
+          </div>
+        </div>
+        <Field
+          label="شناسه‌ی عددی حساب‌های معرفِ خودتان"
+          htmlFor="pool-ids"
+          hint="هر خط یک شناسه. این حساب‌ها را خودتان در ربات ساخته‌اید (مثلاً حساب‌های جانبی)."
+          error={invalid.length ? `شناسه‌ی نامعتبر: ${invalid.join("، ")}` : undefined}
+        >
+          <Textarea id="pool-ids" dir="ltr" rows={4} className="text-left" value={ids} onChange={(e) => setIds(e.target.value)} />
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => save.mutate()} disabled={save.isPending || invalid.length > 0 || parsed.join(",") === snapshot}>
+            <SaveIcon /> ذخیره‌ی استخر
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => check.mutate()}
+            disabled={check.isPending || !account.bot.configured || !account.settings.referrer_pool.length}
+          >
+            <RefreshCwIcon className={check.isPending ? "animate-spin" : ""} /> بررسی معرف‌ها در ربات
+          </Button>
+        </div>
+        {!!tracking.data?.pool.length && (
+          <div className="grid gap-1.5 text-sm" data-testid="pool">
+            {tracking.data.pool.map((p) => (
+              <div key={p.referrer_id} className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2">
+                <span className="ltr font-medium">{p.referrer_id}</span>
+                {p.check ? (
+                  p.check.exists ? (
+                    <Badge variant="success">در ربات هست</Badge>
+                  ) : (
+                    <Badge variant="destructive">پیدا نشد</Badge>
+                  )
+                ) : (
+                  <Badge variant="secondary">بررسی نشده</Badge>
+                )}
+                {p.check?.invited != null && (
+                  <Badge variant={p.check.invited > 0 ? "warning" : "outline"} className="num">
+                    {num(p.check.invited)} دعوت قبلی
+                  </Badge>
+                )}
+                <span className="text-xs text-muted-foreground">
+                  {p.free ? "آزاد" : `${num(p.ads)} آگهی`}
+                  {p.tag_name && ` · برچسب «${p.tag_name}»`}
+                </span>
+                {!!p.check?.invited && (
+                  <span className="w-full text-xs text-warning">این معرف از قبل دعوت دارد؛ آمار آگهی‌هایش با دعوت‌های قبلی مخلوط می‌شود.</span>
+                )}
+                {p.check?.error && !p.check.exists && <span className="w-full text-xs text-destructive">{p.check.error}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
     </Card>
   );
 }

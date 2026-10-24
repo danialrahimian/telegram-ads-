@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.1.0 — budget history, bulk operations, bot diagnostics
+
+**Budget-aware rules**
+- Budget history per ad (`ad_budget_events`): funded (from empty), empty, top-up and withdrawal. Top-ups made directly on ads.telegram.org are detected from a jump of `remaining_budget`; the panel's own top-ups and withdrawals are recorded by the job runner. Existing ads count as funded "from now" after the upgrade, so none is judged stalled by mistake.
+- The "withdraw idle budget" rule only measures days with budget: spend since `max(28 days ago, last funding from empty)`, and only after the ad has had budget continuously for `stalled_min_age_days`. The cost per start used by every rule is measured on the ad's last 28 funded days.
+- New proposal **refill**: a good ad that ran out of budget gets a top-up of about twice its monthly spend (capped per top-up), with the number of days it has had no budget. Ads list and ad page show "بی‌بودجه از N روز پیش" and the budget history.
+- New proposal **replace**: an ad Telegram declined (with its decline reason), an ad with budget but no views for N days while other ads of the account are shown, or a text that probably breaks Telegram's ad guidelines.
+
+**Bulk operations** (new "عملیات گروهی" page in every account)
+- Select ads (checkboxes, "select every filtered result", a bottom bar on mobile), then change the text and/or photo or give each ad its own referral link. Every operation shows a preview (what changes per ad, money from the account balance or from the old ad, warnings) and runs only after explicit confirmation.
+- Two modes: edit in place (`editAd`, statistics kept) or replacement (default): a new ad with the same placement, CPM and target; only after Telegram approves it the old ad is paused, its budget withdrawn 10 minutes later and optionally moved to the new ad, and the old ad deleted (when the API has `deleteAd`) or archived (stopped, no budget, hidden behind an "archived" filter). A declined new ad leaves the old one untouched; declined ads can be edited and resubmitted.
+- Every Telegram call is a queued job with an idempotency key; ads are submitted in batches (size, interval and the number waiting in review are account settings); a running operation can be stopped (queued jobs are cancelled). Per-ad and daily top-up caps apply to initial budgets and transfers.
+- Text checks against Telegram's ad guidelines (length, emoji, decorative characters, line breaks, invented urgency, clickbait, extra or mismatching links, shorteners, language) with a "fix with Claude" rewrite the user edits before use. New texts are saved in the text library and linked to the ads. The photo is uploaded once and reused for all ads.
+- Referral links from a pool of the advertiser's own referrer accounts (checked with `users → user`, with a warning when a referrer already has invites); with fewer referrers than ads the ads are grouped by channel/bot, CPM or placement. A "campaign code" mode exists as a disabled option with a request text for the bot's developer. The sales page shows ads without a tag and a "create tags for all" shortcut; the texts page selects all ads of a text.
+- Telegram Ads API capabilities are detected without touching any ad: `deleteAd` with an empty body, and `editAd` on ad 0 with an invalid photo id; a one-ad test settles photo editing when the probe is inconclusive.
+
+**Sales-bot diagnostics**
+- "Bot connection diagnostics" tries every request separately (statbot, each ledger request shape and the per-type query, affiliates of every referrer, user, setting_info, invoices when needed) and shows method, path, action, body, HTTP status, time, the bot's message, the start of a non-JSON answer, rows and fields, with a cause and a fix in Persian (DNS, TLS, timeout, 404, redirect/HTML, invalid key, missing permission, 405, 429, internal error, empty or non-JSON or unknown answer, zero rows).
+- Checks that the right bot is connected: user count next to the username, the username reported by `setting_info`, and a warning when the user count jumps.
+- The bot sync stores the result of each part (stats, ledger, each referral tag); "no transactions read" is its own state with the filters sent. A copyable report for the bot developer never contains the API key or any token (scrubbed everywhere; covered by tests).
+
 ## v2.0.0 — Telegram Ads Manager
 
 A rebuild of the project as a multi-account Telegram Ads manager.

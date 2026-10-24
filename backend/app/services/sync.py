@@ -33,7 +33,7 @@ from app.integrations.bot_api import (
 )
 from app.integrations.telegram_ads import TelegramAdsClient, TelegramAdsError
 from app.models import Account, AccountSnapshot, Ad, AdStat, BotTransaction, BotUser, ReferralTag
-from app.services import events
+from app.services import bot_diag, budget, events
 from app.services.accounts import apply_account_info, settings_of
 
 log = get_logger("sync")
@@ -152,8 +152,9 @@ async def _fast_sync(account_id: int) -> dict[str, Any]:
             ad_id = int(raw["ad_id"])
             seen.add(ad_id)
             row = existing.get(ad_id)
+            fresh = row is None
             if row is None:
-                row = Ad(account_id=account_id, ad_id=ad_id)
+                row = Ad(account_id=account_id, ad_id=ad_id, remaining_budget=0.0, funded_since_ts=0, empty_since_ts=0)
                 s.add(row)
             typ, label = target_summary(raw.get("target"))
             row.title = str(raw.get("title") or "")[:200]
@@ -170,9 +171,13 @@ async def _fast_sync(account_id: int) -> dict[str, Any]:
             row.actions = int(raw.get("actions", raw.get("joins", 0)) or 0)
             row.action_type = str(raw.get("action_type") or "")
             row.spent_budget = float(raw.get("spent_budget") or 0)
-            row.remaining_budget = float(raw.get("remaining_budget") or 0)
             row.daily_budget_limit = float(raw.get("daily_budget_limit") or 0)
             row.created_date = int(raw.get("created_date") or 0)
+            remaining = float(raw.get("remaining_budget") or 0)
+            if fresh:
+                budget.first_seen(row, remaining, now)
+            else:
+                budget.observe(s, row, remaining, now)
             row.target_type, row.target_label = typ, label
             row.target = raw.get("target") or {}
             row.has_photo, row.has_video = bool(raw.get("photo")), bool(raw.get("video"))
@@ -316,11 +321,19 @@ async def bot_sync(account_id: int) -> dict[str, Any]:
     tag_errors: dict[int, str] = {}
     errors: list[str] = []
     fields = dict(acc.bot_fields or {})
+    parts: dict[str, Any] = {}
+
+    def part(entry: dict[str, Any] | None, *, expect_rows: bool, **extra: Any) -> dict[str, Any]:
+        cause = bot_diag.classify(entry or {}, expect_rows=expect_rows)
+        return {"ok": cause["code"] in ("ok", "ok_empty"), **cause, "msg": (entry or {}).get("msg", ""), **extra}
+
     async with BotApiClient(acc.bot_base_url, key) as c:
         try:
             stats = await c.statbot()
+            parts["stats"] = part(c.trace[-1], expect_rows=False, count_user=stats.get("count_user"))
         except BotApiError as e:
             errors.append(e.friendly)
+            parts["stats"] = part(c.trace[-1] if c.trace else None, expect_rows=False, error=e.friendly)
 
         async def ledger(tx_type: str | None = None) -> list[dict[str, Any]]:
             out: list[dict[str, Any]] = []
@@ -338,9 +351,11 @@ async def bot_sync(account_id: int) -> dict[str, Any]:
                     break
             return out
 
+        filters = {"from": from_ts, "purchase_types": purchase_types}
         try:
             txs = await ledger()
             fields["transactions_mode"] = ["all"]
+            parts["transactions"] = part(c.trace[-1], expect_rows=True, rows=len(txs), mode="all", filters=filters)
         except BotApiError as e:
             # Some bot builds crash on the unfiltered ledger but answer the documented per-type query.
             per_type: list[dict[str, Any]] = []
@@ -351,8 +366,13 @@ async def bot_sync(account_id: int) -> dict[str, Any]:
                     per_type.extend(await ledger(ptype))
                 txs = per_type
                 fields["transactions_mode"] = ["per_type"]
+                parts["transactions"] = part(
+                    c.trace[-1], expect_rows=True, rows=len(txs), mode="per_type", filters=filters
+                )
             except BotApiError:
                 errors.append(e.friendly)
+                parts["transactions"] = part(c.trace[-1], expect_rows=True, error=e.friendly, filters=filters)
+        tag_parts: dict[str, Any] = {}
         for tag_id, referrer in tags:
             users: list[dict[str, Any]] = []
             try:
@@ -366,8 +386,11 @@ async def bot_sync(account_id: int) -> dict[str, Any]:
                     if len({u["user_id"] for u in users}) < len(users):  # paging ignored: same rows again
                         break
                 tag_users[tag_id] = users
+                tag_parts[str(tag_id)] = part(c.trace[-1], expect_rows=True, rows=len(users), referrer=referrer)
             except BotApiError as e:
                 tag_errors[tag_id] = e.friendly
+                tag_parts[str(tag_id)] = part(c.trace[-1], expect_rows=True, error=e.friendly, referrer=referrer)
+        parts["tags"] = tag_parts
     async with session_scope() as s:
         a = await s.get(Account, account_id)
         if a is None:
@@ -375,6 +398,16 @@ async def bot_sync(account_id: int) -> dict[str, Any]:
         a.bot_fields = fields
         a.bot_checked_ts = now
         if stats is not None:
+            prev = (a.sync_state or {}).get("bot_users_last")
+            cur = stats.get("count_user")
+            if bot_diag.users_jump(prev if isinstance(prev, int) else None, cur if isinstance(cur, int) else None):
+                warn = f"تعداد کاربران ربات ناگهان از {prev} به {cur} رسید؛ احتمالاً ربات یا کلید دیگری وصل شده است."
+                parts["stats"]["warning"] = warn
+                events.log(s, "bot_users_jump", account_id=account_id, detail=warn, level="warn")
+            state = dict(a.sync_state or {})
+            if isinstance(cur, int):
+                state["bot_users_last"] = cur
+            a.sync_state = state
             a.bot_stats = stats
         if errors and stats is None and not txs:
             a.bot_status, a.bot_error = "error", errors[0]
@@ -437,7 +470,7 @@ async def bot_sync(account_id: int) -> dict[str, Any]:
         ok=ok,
         error=errors[0] if errors else "",
         started=started,
-        extra={"transactions": len(txs), "tags": len(tag_users), "warnings": errors[:5]},
+        extra={"transactions": len(txs), "tags": len(tag_users), "warnings": errors[:5], "parts": parts},
     )
     if not ok:
         raise BotApiError(errors[0])
@@ -447,6 +480,10 @@ async def bot_sync(account_id: int) -> dict[str, Any]:
 async def run(account_id: int, kind: str) -> dict[str, Any]:
     fn = {"fast": fast_sync, "stats": stats_sync, "bot": bot_sync}[kind]
     result = await fn(account_id)
+    if kind == "fast":
+        from app.services import bulk
+
+        await bulk.advance(account_id)  # review results of bulk operations arrive with the ad list
     if kind in ("fast", "stats"):
         from app.services import rules
 

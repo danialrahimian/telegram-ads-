@@ -14,7 +14,10 @@ import type {
   AdRow,
   Analysis,
   AppSettings,
+  BulkOperation,
+  Capabilities,
   DailyRow,
+  DiagReport,
   EventRow,
   Job,
   Live,
@@ -26,6 +29,7 @@ import type {
   SystemInfo,
   Tag,
   TextVariant,
+  TrackingInfo,
 } from "@/lib/types";
 
 export const keys = {
@@ -110,11 +114,16 @@ export function useDashboard(slug: string, days = 60) {
   });
 }
 
-export function useAds(slug: string, since?: string) {
+export function useAds(slug: string, since?: string, archived = false) {
   const refetchInterval = useRefreshMs();
+  const qs = new URLSearchParams();
+  if (since) qs.set("since", since);
+  if (archived) qs.set("archived", "true");
+  const q = qs.toString();
   return useQuery({
-    queryKey: [...keys.acc(slug), "ads", since ?? ""],
-    queryFn: () => api.get<{ ads: AdRow[]; since: string | null }>(`${A(slug)}/ads${since ? `?since=${since}` : ""}`),
+    queryKey: [...keys.acc(slug), "ads", since ?? "", archived],
+    queryFn: () =>
+      api.get<{ ads: AdRow[]; since: string | null; archived_count: number }>(`${A(slug)}/ads${q ? `?${q}` : ""}`),
     refetchInterval: refetchInterval * 2,
     placeholderData: keepPreviousData,
   });
@@ -185,6 +194,45 @@ export function useActivity(slug: string) {
     queryKey: [...keys.acc(slug), "activity"],
     queryFn: () => api.get<{ now: number; jobs: Job[]; events: EventRow[] }>(`${A(slug)}/activity`),
     refetchInterval,
+  });
+}
+
+export function useBulkOps(slug: string) {
+  const refetchInterval = useRefreshMs();
+  return useQuery({
+    queryKey: [...keys.acc(slug), "bulk"],
+    queryFn: () => api.get<{ operations: BulkOperation[]; capabilities: Capabilities }>(`${A(slug)}/bulk`),
+    refetchInterval,
+  });
+}
+
+export function useBulkOp(slug: string, id: number) {
+  const refetchInterval = useRefreshMs();
+  return useQuery({
+    queryKey: [...keys.acc(slug), "bulk", id],
+    queryFn: () => api.get<BulkOperation>(`${A(slug)}/bulk/${id}`),
+    refetchInterval,
+  });
+}
+
+export function useCapabilities(slug: string) {
+  return useQuery({
+    queryKey: [...keys.acc(slug), "capabilities"],
+    queryFn: () => api.get<Capabilities>(`${A(slug)}/bulk/capabilities`),
+  });
+}
+
+export function useTracking(slug: string) {
+  return useQuery({
+    queryKey: [...keys.acc(slug), "tracking"],
+    queryFn: () => api.get<TrackingInfo>(`${A(slug)}/tracking`),
+  });
+}
+
+export function useBotDiag(slug: string) {
+  return useQuery({
+    queryKey: [...keys.acc(slug), "bot-diag"],
+    queryFn: () => api.get<{ report: DiagReport | null; text: string }>(`${A(slug)}/bot/diagnose`),
   });
 }
 
