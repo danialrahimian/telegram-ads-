@@ -1,8 +1,21 @@
-import { ArrowDownWideNarrowIcon, MegaphoneIcon, PlusIcon, SearchIcon, TagIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  ArchiveIcon,
+  ArrowDownWideNarrowIcon,
+  LinkIcon,
+  ListChecksIcon,
+  MegaphoneIcon,
+  PencilLineIcon,
+  PlusIcon,
+  SearchIcon,
+  TagIcon,
+  WalletIcon,
+  XIcon,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { AdActions } from "@/components/ad-actions";
 import { AdStatusBadge, placementLabel } from "@/components/ad-status";
+import { BulkDialog } from "@/components/bulk-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { useAccountCtx } from "@/components/layout/account-layout";
 import { PageHeader } from "@/components/page-header";
@@ -10,17 +23,19 @@ import { QueryError } from "@/components/query-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { budgetless, headerState, toggleAll, toggleOne } from "@/lib/bulk";
 import { currencyLabel, money, num, pct } from "@/lib/format";
-import { useAds } from "@/lib/queries";
-import type { AdRow, AdWindow } from "@/lib/types";
+import { useAds, useTexts } from "@/lib/queries";
+import type { AdRow, AdWindow, BulkKind } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type StatusFilter = "all" | "running" | "review" | "stopped" | "declined";
+type StatusFilter = "all" | "running" | "review" | "stopped" | "declined" | "archived";
 type SortKey = "spent" | "starts" | "cps" | "remaining" | "newest" | "buyers";
 
 function windowed(a: AdRow, w: AdWindow) {
@@ -36,7 +51,7 @@ function windowed(a: AdRow, w: AdWindow) {
 }
 
 function matchStatus(a: AdRow, f: StatusFilter) {
-  if (f === "all") return true;
+  if (f === "all" || f === "archived") return true;
   if (f === "running") return a.running;
   if (f === "review") return a.status === "in_review" || a.status === "ready_for_review";
   if (f === "declined") return a.status === "declined";
@@ -51,10 +66,18 @@ export default function AdsPage() {
   const status = (params.get("status") as StatusFilter) || "all";
   const sort = (params.get("sort") as SortKey) || "spent";
   const since = params.get("since") || "";
+  const tagFilter = params.get("tag") || "";
+  const textId = params.get("text_id") || "";
   const [q, setQ] = useState("");
-  const { data, isLoading, error, refetch } = useAds(account.slug, win === "since" && since ? since : undefined);
+  const archived = status === "archived";
+  const { data, isLoading, error, refetch } = useAds(account.slug, win === "since" && since ? since : undefined, archived);
+  const texts = useTexts(account.slug);
   const cur = account.telegram.currency;
   const stopCps = account.settings.stop_cost_per_start;
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulk, setBulk] = useState<BulkKind | null>(null);
+  const autoOpened = useRef(false);
+  const textVariant = textId ? texts.data?.find((t) => String(t.id) === textId) : undefined;
 
   const set = (k: string, v: string) => {
     const next = new URLSearchParams(params);
@@ -68,6 +91,10 @@ export default function AdsPage() {
     const list = (data?.ads ?? []).filter(
       (a) =>
         matchStatus(a, status) &&
+        (tagFilter !== "none" || !a.tag_id) &&
+        (!textId ||
+          String(a.variant_id) === textId ||
+          (!!textVariant && a.text.trim() === textVariant.text.trim())) &&
         (!term ||
           String(a.ad_id).includes(term) ||
           a.text.toLowerCase().includes(term) ||
@@ -92,7 +119,20 @@ export default function AdsPage() {
       }
     };
     return [...list].sort((a, b) => (sort === "cps" ? val(a) - val(b) : val(b) - val(a)));
-  }, [data, q, status, sort, win]);
+  }, [data, q, status, sort, win, tagFilter, textId, textVariant]);
+  const visibleIds = useMemo(() => rows.map((a) => a.ad_id), [rows]);
+  const chosen = useMemo(() => (data?.ads ?? []).filter((a) => selected.has(a.ad_id)), [data, selected]);
+
+  // Links from other pages: /ads?tag=none&select=all&bulk=referral selects every result and opens the dialog.
+  useEffect(() => {
+    if (autoOpened.current || !data || !visibleIds.length) return;
+    if (params.get("select") === "all") {
+      autoOpened.current = true;
+      setSelected(new Set(visibleIds));
+      const k = params.get("bulk");
+      if (k === "referral" || k === "content") setBulk(k);
+    }
+  }, [data, visibleIds, params]);
 
   const counts = useMemo(() => {
     const all = data?.ads ?? [];
@@ -102,6 +142,7 @@ export default function AdsPage() {
       review: all.filter((a) => matchStatus(a, "review")).length,
       stopped: all.filter((a) => matchStatus(a, "stopped")).length,
       declined: all.filter((a) => matchStatus(a, "declined")).length,
+      archived: data?.archived_count ?? 0,
     };
   }, [data]);
 
@@ -129,10 +170,14 @@ export default function AdsPage() {
                 ["review", "در بررسی"],
                 ["stopped", "متوقف"],
                 ["declined", "رد شده"],
+                ["archived", "بایگانی‌شده"],
               ] as const
             ).map(([k, label]) => (
               <TabsTrigger key={k} value={k} className="flex-none">
-                {label} <span className="num text-xs text-muted-foreground">{num(counts[k])}</span>
+                {label}{" "}
+                {(!archived || k === "archived") && (
+                  <span className="num text-xs text-muted-foreground">{num(counts[k])}</span>
+                )}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -168,6 +213,16 @@ export default function AdsPage() {
               aria-label="از تاریخ"
             />
           )}
+          <Select value={tagFilter || "all"} onValueChange={(v) => set("tag", v === "all" ? "" : v)}>
+            <SelectTrigger className="w-40" aria-label="برچسب">
+              <TagIcon />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">همه‌ی برچسب‌ها</SelectItem>
+              <SelectItem value="none">بدون برچسب رفرال</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={sort} onValueChange={(v) => set("sort", v === "spent" ? "" : v)}>
             <SelectTrigger className="w-40" aria-label="مرتب‌سازی">
               <ArrowDownWideNarrowIcon />
@@ -185,6 +240,26 @@ export default function AdsPage() {
         </div>
       </div>
 
+      {textId && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Badge variant="info">آگهی‌های متن «{textVariant?.name ?? textId}»</Badge>
+          <Button size="sm" variant="ghost" onClick={() => set("text_id", "")}>
+            <XIcon /> برداشتن فیلتر
+          </Button>
+        </div>
+      )}
+      {rows.length > 0 && !archived && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Button size="sm" variant="outline" onClick={() => setSelected(new Set(visibleIds))}>
+            <ListChecksIcon /> انتخاب همه‌ی نتایج فیلتر ({num(visibleIds.length)})
+          </Button>
+          {selected.size > 0 && (
+            <span className="text-xs text-muted-foreground">
+              <span className="num">{num(selected.size)}</span> آگهی انتخاب شده
+            </span>
+          )}
+        </div>
+      )}
       {error && <QueryError error={error} retry={() => refetch()} />}
       {isLoading && <Skeleton className="h-96" />}
       {!isLoading && !error && rows.length === 0 && (
@@ -202,6 +277,15 @@ export default function AdsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  {!archived && (
+                    <TableHead className="w-8">
+                      <Checkbox
+                        aria-label="انتخاب همه"
+                        checked={headerState(selected, visibleIds)}
+                        onCheckedChange={() => setSelected((x) => toggleAll(x, visibleIds))}
+                      />
+                    </TableHead>
+                  )}
                   <TableHead>آگهی</TableHead>
                   <TableHead>وضعیت</TableHead>
                   <TableHead className="text-end">خرج</TableHead>
@@ -220,11 +304,21 @@ export default function AdsPage() {
                     <TableRow
                       key={a.ad_id}
                       className="cursor-pointer"
+                      data-state={selected.has(a.ad_id) ? "selected" : undefined}
                       onClick={(e) => {
-                        if ((e.target as HTMLElement).closest("button,a,[role=menuitem]")) return;
+                        if ((e.target as HTMLElement).closest("button,a,[role=menuitem],[role=checkbox]")) return;
                         nav(String(a.ad_id));
                       }}
                     >
+                      {!archived && (
+                        <TableCell>
+                          <Checkbox
+                            aria-label={`انتخاب آگهی ${a.ad_id}`}
+                            checked={selected.has(a.ad_id)}
+                            onCheckedChange={() => setSelected((x) => toggleOne(x, a.ad_id))}
+                          />
+                        </TableCell>
+                      )}
                       <TableCell className="max-w-[22rem] whitespace-normal">
                         <div className="flex items-center gap-1.5">
                           <Link to={String(a.ad_id)} className="truncate font-medium hover:underline">
@@ -243,7 +337,19 @@ export default function AdsPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <AdStatusBadge status={a.status} paused={a.is_paused} />
+                        <div className="flex flex-col items-start gap-1">
+                          <AdStatusBadge status={a.status} paused={a.is_paused} />
+                          {budgetless(a) && !archived && (
+                            <Badge variant="warning" className="text-[10px]">
+                              <WalletIcon /> {budgetless(a)}
+                            </Badge>
+                          )}
+                          {a.archived && (
+                            <Badge variant="secondary" className="text-[10px]">
+                              <ArchiveIcon /> بایگانی
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="num text-end">{money(w.spent, cur)}</TableCell>
                       <TableCell className="num text-end">{num(w.starts)}</TableCell>
@@ -270,8 +376,16 @@ export default function AdsPage() {
             {rows.map((a) => {
               const w = windowed(a, win);
               return (
-                <Card key={a.ad_id} className="gap-3 px-4 py-3">
+                <Card key={a.ad_id} className={cn("gap-3 px-4 py-3", selected.has(a.ad_id) && "border-primary")}>
                   <div className="flex items-start gap-2">
+                    {!archived && (
+                      <Checkbox
+                        className="mt-1"
+                        aria-label={`انتخاب آگهی ${a.ad_id}`}
+                        checked={selected.has(a.ad_id)}
+                        onCheckedChange={() => setSelected((x) => toggleOne(x, a.ad_id))}
+                      />
+                    )}
                     <Link to={String(a.ad_id)} className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
                         <span className="truncate font-medium">{a.target_label || a.title || `#${a.ad_id}`}</span>
@@ -285,9 +399,14 @@ export default function AdsPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <AdStatusBadge status={a.status} paused={a.is_paused} />
+                    {budgetless(a) && !archived && (
+                      <Badge variant="warning">
+                        <WalletIcon /> {budgetless(a)}
+                      </Badge>
+                    )}
                     {a.tag_name && (
-                      <Badge variant="info">
-                        <TagIcon /> {a.tag_name}
+                      <Badge variant="info" className="max-w-full">
+                        <TagIcon /> <span className="truncate">{a.tag_name}</span>
                       </Badge>
                     )}
                   </div>
@@ -306,6 +425,42 @@ export default function AdsPage() {
             })}
           </div>
         </>
+      )}
+
+      {selected.size > 0 && !archived && (
+        <>
+          <div className="h-20 md:hidden" aria-hidden />
+          <div
+            role="toolbar"
+            aria-label="اقدام گروهی"
+            className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 px-4 py-3 shadow-lg backdrop-blur md:sticky md:bottom-4 md:mx-auto md:max-w-3xl md:rounded-xl md:border"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium">
+                <span className="num">{num(selected.size)}</span> آگهی
+              </span>
+              <div className="ms-auto flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => setBulk("content")}>
+                  <PencilLineIcon /> متن/عکس
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setBulk("referral")}>
+                  <LinkIcon /> لینک رفرال
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} aria-label="پاک کردن انتخاب">
+                  <XIcon />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+      {bulk && chosen.length > 0 && (
+        <BulkDialog
+          account={account}
+          kind={bulk}
+          targets={chosen.map((a) => ({ ad_id: a.ad_id, label: a.target_label || a.title || `#${a.ad_id}`, text: a.text }))}
+          onClose={() => setBulk(null)}
+        />
       )}
     </div>
   );

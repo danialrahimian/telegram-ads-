@@ -32,6 +32,19 @@ export function SyncStatus({ account }: { account: Account }) {
         const st = account.sync[k];
         const running = account.syncing.includes(k);
         const failed = !!st?.error;
+        const parts = k === "bot" ? st?.parts : undefined;
+        const partIssues = parts
+          ? [
+              parts.stats && !parts.stats.ok ? `آمار: ${parts.stats.title}` : "",
+              parts.stats?.warning ?? "",
+              parts.transactions && (!parts.transactions.ok || parts.transactions.code === "ok_empty")
+                ? `تراکنش‌ها: ${parts.transactions.title}`
+                : "",
+              ...Object.values(parts.tags ?? {})
+                .filter((p) => !p.ok)
+                .map((p) => `رفرال ${p.referrer ?? ""}: ${p.title}`),
+            ].filter(Boolean)
+          : [];
         return (
           <Tooltip key={k}>
             <TooltipTrigger asChild>
@@ -39,7 +52,15 @@ export function SyncStatus({ account }: { account: Account }) {
                 <span
                   className={cn(
                     "size-1.5 rounded-full",
-                    running ? "animate-pulse bg-info" : failed ? "bg-destructive" : st?.last_ok ? "bg-success" : "bg-muted-foreground/40",
+                    running
+                      ? "animate-pulse bg-info"
+                      : failed
+                        ? "bg-destructive"
+                        : partIssues.length
+                          ? "bg-warning"
+                          : st?.last_ok
+                            ? "bg-success"
+                            : "bg-muted-foreground/40",
                   )}
                 />
                 {KIND_LABEL[k]}: <span className="num">{running ? "در حال اجرا…" : ago(st?.last_ok, now)}</span>
@@ -48,6 +69,11 @@ export function SyncStatus({ account }: { account: Account }) {
             <TooltipContent>
               <div>هر {seconds(account.settings[INTERVAL_KEY[k]])} یک بار</div>
               {failed && <div className="mt-1 text-destructive-foreground/90">آخرین خطا: {st?.error}</div>}
+              {partIssues.map((t) => (
+                <div key={t} className="mt-1">
+                  {t}
+                </div>
+              ))}
             </TooltipContent>
           </Tooltip>
         );

@@ -174,6 +174,11 @@ def _group_key(r: dict[str, Any], group_by: str) -> str:
     return r["target_label"] or f"#{r['ad_id']}"
 
 
+def _join_labels(labels: list[str]) -> str:
+    head = "، ".join(labels[:2])
+    return head + (f" و {len(labels) - 2} گروه دیگر" if len(labels) > 2 else "")
+
+
 def assign(
     rows: list[dict[str, Any]], pool: list[dict[str, Any]], group_by: str = "target"
 ) -> tuple[list[dict[str, Any]], list[str]]:
@@ -215,7 +220,12 @@ def assign(
         b["labels"].append(label)
         b["ad_ids"].extend(ids)
     out = [
-        {"referrer_id": b["referrer_id"], "tag_id": b["tag_id"], "label": "، ".join(b["labels"]), "ad_ids": b["ad_ids"]}
+        {
+            "referrer_id": b["referrer_id"],
+            "tag_id": b["tag_id"],
+            "label": _join_labels(b["labels"]),
+            "ad_ids": b["ad_ids"],
+        }
         for b in buckets
         if b["ad_ids"]
     ]

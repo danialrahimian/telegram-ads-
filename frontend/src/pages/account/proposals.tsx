@@ -1,7 +1,8 @@
-import { CheckIcon, LightbulbIcon, PlayIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { useMemo } from "react";
+import { CheckIcon, LightbulbIcon, PlayIcon, RefreshCwIcon, ReplaceIcon, XIcon } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { placementLabel } from "@/components/ad-status";
+import { BulkDialog, type BulkTarget } from "@/components/bulk-dialog";
 import { ConfirmButton } from "@/components/confirm-button";
 import { EmptyState } from "@/components/empty-state";
 import { useAccountCtx } from "@/components/layout/account-layout";
@@ -18,13 +19,27 @@ import { dateTime, money, num } from "@/lib/format";
 import { accountApi, keys, useAction, useProposals } from "@/lib/queries";
 import type { Proposal } from "@/lib/types";
 
-const KIND_ORDER: Proposal["kind"][] = ["stop", "withdraw", "topup", "refresh"];
+const KIND_ORDER: Proposal["kind"][] = ["replace", "stop", "withdraw", "refill", "topup", "refresh"];
 const KIND_TITLE: Record<Proposal["kind"], { title: string; desc: string; variant: "destructive" | "warning" | "success" | "info" }> = {
   stop: { title: "توقف آگهی‌های پرهزینه", desc: "هزینه‌ی هر استارت از سقف بیشتر است", variant: "destructive" },
   withdraw: { title: "پس گرفتن بودجه‌ی بلااستفاده", desc: "آگهی دیگر نمایش داده نمی‌شود ولی بودجه دارد", variant: "warning" },
   topup: { title: "شارژ آگهی‌های خوب", desc: "آگهی ارزان کار می‌کند و بودجه‌اش رو به اتمام است", variant: "success" },
   refresh: { title: "تازه کردن متن", desc: "عملکرد آگهی نسبت به اوایلش افت کرده (خستگی)", variant: "info" },
+  refill: {
+    title: "شارژ دوباره‌ی آگهی‌های خوبِ بی‌بودجه",
+    desc: "آگهی در روزهایی که بودجه داشت ارزان کار می‌کرد و حالا بودجه‌اش تمام شده",
+    variant: "success",
+  },
+  replace: {
+    title: "جایگزینی آگهی (مشکل متن یا عکس)",
+    desc: "تلگرام آگهی را رد کرده، نمایشش نمی‌دهد یا متنش احتمالاً با قوانین نمی‌خواند",
+    variant: "destructive",
+  },
 };
+
+function target(p: Proposal): BulkTarget {
+  return { ad_id: p.ad_id, label: p.target_label || p.title || `#${p.ad_id}`, text: p.text ?? "", reason: p.reason };
+}
 
 export default function ProposalsPage() {
   const account = useAccountCtx();
@@ -33,6 +48,7 @@ export default function ProposalsPage() {
   const base = accountApi(account.slug);
   const inv = [keys.acc(account.slug), keys.accounts];
   const cur = account.telegram.currency;
+  const [replacing, setReplacing] = useState<Proposal[] | null>(null);
 
   const approve = useAction<number, { kind: string; ad_id: number | null; message: string }>({
     fn: (id) => api.post(`${base}/proposals/${id}/approve`),
@@ -87,6 +103,16 @@ export default function ProposalsPage() {
         </Card>
       )}
 
+      {replacing && (
+        <BulkDialog
+          account={account}
+          kind="replace"
+          targets={replacing.map(target)}
+          proposalIds={replacing.map((p) => p.id)}
+          onClose={() => setReplacing(null)}
+        />
+      )}
+
       {data && (
         <Tabs defaultValue="pending">
           <TabsList>
@@ -113,14 +139,21 @@ export default function ProposalsPage() {
                     {KIND_TITLE[kind].title}
                   </CardTitle>
                   <CardDescription>{KIND_TITLE[kind].desc}</CardDescription>
-                  {kind !== "refresh" && items.length > 1 && (
+                  {kind === "replace" && items.length > 1 && (
+                    <CardAction>
+                      <Button size="sm" variant="outline" onClick={() => setReplacing(items)}>
+                        <CheckIcon /> تأیید همه
+                      </Button>
+                    </CardAction>
+                  )}
+                  {kind !== "refresh" && kind !== "replace" && items.length > 1 && (
                     <CardAction>
                       <ConfirmButton
                         size="sm"
                         variant="outline"
                         title={`تأیید همه‌ی ${num(items.length)} پیشنهاد؟`}
                         description={
-                          kind === "topup"
+                          kind === "topup" || kind === "refill"
                             ? "همه‌ی شارژها تا سقف روزانه در صف اجرا می‌روند."
                             : "همه‌ی این آگهی‌ها متوقف می‌شوند و بودجه‌شان بعد از ۱۰ دقیقه برمی‌گردد."
                         }
@@ -145,15 +178,21 @@ export default function ProposalsPage() {
                         <p className="text-xs leading-relaxed text-muted-foreground">{p.reason}</p>
                       </div>
                       <div className="flex shrink-0 gap-2">
-                        <Button
-                          size="sm"
-                          variant={kind === "stop" || kind === "withdraw" ? "destructive" : "default"}
-                          disabled={approve.isPending}
-                          onClick={() => approve.mutate(p.id)}
-                        >
-                          {kind === "refresh" ? <PlayIcon /> : <CheckIcon />}
-                          {kind === "refresh" ? "ساخت آگهی جایگزین" : "تأیید"}
-                        </Button>
+                        {kind === "replace" ? (
+                          <Button size="sm" onClick={() => setReplacing([p])}>
+                            <ReplaceIcon /> ساخت آگهی جایگزین
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant={kind === "stop" || kind === "withdraw" ? "destructive" : "default"}
+                            disabled={approve.isPending}
+                            onClick={() => approve.mutate(p.id)}
+                          >
+                            {kind === "refresh" ? <PlayIcon /> : <CheckIcon />}
+                            {kind === "refresh" ? "ساخت آگهی جایگزین" : "تأیید"}
+                          </Button>
+                        )}
                         <Button size="sm" variant="ghost" disabled={reject.isPending} onClick={() => reject.mutate(p.id)}>
                           <XIcon /> رد
                         </Button>

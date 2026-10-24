@@ -50,7 +50,7 @@ STATUS_LABEL = {
     "failed": "ناموفق",
     "skipped": "رد شد از عملیات",
 }
-REVIEW_WARNING = "آگهی به بررسی تلگرام می‌رود و تا تأیید نمایش داده نمی‌شود."
+REVIEW_WARNING = "به بررسی تلگرام می‌رود و تا تأیید نمایش داده نمی‌شود."
 
 
 # ---------------------------------------------------------------- capabilities
@@ -262,7 +262,13 @@ async def plan(s: AsyncSession, acc: Account, body: dict[str, Any], *, live_bala
             it["warnings"].extend(i["message"] for i in chk["issues"] if i["severity"] == "warn")
             it["changes"].append({"field": "text", "label": "متن", "old": ad.text, "new": new_text})
             it["params"]["text"] = new_text
-        elif kind == "replace" and not new_text:
+        elif mode == "replace" and not new_text:
+            bad = _blocking(guidelines.check(ad.text, promote_url=new_url))
+            if bad:  # a replacement must not copy a text Telegram would decline again
+                it["blocked"] = "متن فعلی با قوانین تلگرام نمی‌خواند و جایگزین با همان متن ساخته نمی‌شود: " + "؛ ".join(
+                    bad
+                )
+                continue
             it["params"]["text"] = ad.text
         if photo_id:
             it["changes"].append(

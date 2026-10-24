@@ -26,6 +26,7 @@ const TextsPage = lazy(() => import("@/pages/account/texts"));
 const SalesPage = lazy(() => import("@/pages/account/sales"));
 const AnalysisPage = lazy(() => import("@/pages/account/analysis"));
 const ActivityPage = lazy(() => import("@/pages/account/activity"));
+const BulkPage = lazy(() => import("@/pages/account/bulk"));
 const AccountSettingsPage = lazy(() => import("@/pages/account/settings"));
 
 const queryClient = new QueryClient({
@@ -97,6 +98,8 @@ const router = createBrowserRouter([
               { path: "texts", element: <TextsPage /> },
               { path: "sales", element: <SalesPage /> },
               { path: "analysis", element: <AnalysisPage /> },
+              { path: "bulk", element: <BulkPage /> },
+              { path: "bulk/:opId", element: <BulkPage /> },
               { path: "activity", element: <ActivityPage /> },
               { path: "settings", element: <AccountSettingsPage /> },
             ],

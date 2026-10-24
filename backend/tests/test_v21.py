@@ -289,6 +289,8 @@ async def test_bulk_replace_deletes_old_ads_when_the_api_can(api, tg_mock):
     tg_mock.supports_delete = True
     await _setup(api, tg_mock)
     assert (await api.post(f"{A}/bulk/capabilities/probe")).json()["delete_ad"] == "yes"
+    same = (await api.post(f"{A}/bulk/preview", json={"kind": "replace", "ad_ids": [12], "photo_id": "ph_1"})).json()
+    assert "همان متن ساخته نمی‌شود" in same["items"][0]["blocked"]  # the declined text is not copied
     body = {"kind": "replace", "ad_ids": [12], "per_ad": {"12": {"text": "سایکونت | تست رایگان VPN 👇"}}}
     p = (await api.post(f"{A}/bulk/preview", json=body)).json()
     assert p["retire"] == "delete" and not p["errors"]

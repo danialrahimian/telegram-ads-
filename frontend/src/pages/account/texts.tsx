@@ -1,5 +1,6 @@
 import {
   DownloadIcon,
+  ListChecksIcon,
   MegaphoneIcon,
   PencilIcon,
   PlusIcon,
@@ -189,6 +190,13 @@ function TextCard({ t, onEdit }: { t: TextVariant; onEdit: (e: Editing) => void 
           <Button size="sm" variant="outline" onClick={() => onEdit({ id: t.id, name: t.name, text: t.text })}>
             <PencilIcon /> ویرایش
           </Button>
+          {(p.ads ?? 0) > 0 && (
+            <Button size="sm" variant="outline" asChild>
+              <Link to={`/accounts/${account.slug}/ads?text_id=${t.id}&select=all`}>
+                <ListChecksIcon /> آگهی‌های این متن
+              </Link>
+            </Button>
+          )}
           <Button size="sm" variant="outline" asChild>
             <Link to={`/accounts/${account.slug}/ads/new?text_id=${t.id}`}>
               <MegaphoneIcon /> آگهی با این متن

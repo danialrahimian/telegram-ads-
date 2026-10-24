@@ -10,12 +10,28 @@ export interface Me {
   insecure_cookie: boolean;
 }
 
+export interface SyncPart {
+  ok: boolean;
+  code: string;
+  title: string;
+  fix: string;
+  msg?: string;
+  rows?: number;
+  mode?: string;
+  error?: string;
+  warning?: string;
+  referrer?: string;
+  count_user?: number;
+  filters?: { from?: number; purchase_types?: string[] };
+}
+
 export interface SyncState {
   last_try?: number;
   last_ok?: number;
   error?: string;
   fails?: number;
   duration?: number;
+  parts?: { stats?: SyncPart; transactions?: SyncPart; tags?: Record<string, SyncPart> };
   [k: string]: unknown;
 }
 
@@ -41,6 +57,14 @@ export interface AccountSettings {
   bot_timezone: string;
   purchase_types: string[];
   toman_per_unit: number;
+  refill_max_empty_days: number;
+  replace_zero_view_days: number;
+  bulk_batch_size: number;
+  bulk_batch_interval_seconds: number;
+  bulk_max_in_review: number;
+  bulk_min_budget: number;
+  tracking_mode: "pool" | "campaign";
+  referrer_pool: string[];
 }
 
 export interface Account {
@@ -76,6 +100,7 @@ export interface Account {
   settings: AccountSettings;
   sync: Partial<Record<SyncKind, SyncState>>;
   automation_paused: boolean;
+  bot_diag_ts?: number;
   pending_proposals: number;
   queued_jobs?: number;
   syncing: SyncKind[];
@@ -194,6 +219,21 @@ export interface AdRow {
   clicks_since: number;
   views_since: number;
   cps_since: number | null;
+  funded_days_28: number;
+  views_f28: number;
+  clicks_f28: number;
+  starts_f28: number;
+  spent_f28: number;
+  cps_f28: number | null;
+  funded_since_ts: number;
+  empty_since_ts: number;
+  empty_days: number | null;
+  window_days: number;
+  spent_window: number;
+  zero_view_days: number;
+  others_views_in_streak: number;
+  archived: boolean;
+  created_by_app: boolean;
 }
 
 export type AdWindow = "7" | "28" | "since" | "all";
@@ -215,7 +255,7 @@ export interface Job {
 export interface Proposal {
   id: number;
   ad_id: number;
-  kind: "withdraw" | "stop" | "refresh" | "topup";
+  kind: "withdraw" | "stop" | "refresh" | "topup" | "refill" | "replace";
   label: string;
   amount: number | null;
   reason: string;
@@ -227,6 +267,16 @@ export interface Proposal {
   target_label?: string;
   placement?: string;
   title?: string;
+  text?: string;
+  has_photo?: boolean;
+}
+
+export interface BudgetEvent {
+  ts: number;
+  kind: "funded" | "empty" | "topup" | "withdraw";
+  amount: number;
+  remaining: number;
+  actor: string;
 }
 
 export interface AdDetail {
@@ -235,6 +285,8 @@ export interface AdDetail {
   daily: { day: string; views: number; clicks: number; starts: number; spent: number }[];
   jobs: Job[];
   proposals: Proposal[];
+  budget_history: BudgetEvent[];
+  bulk: { op_id: number; item_id: number; status: string; new_ad_id: number | null; old_ad_id: number }[];
 }
 
 export interface TextAnalysis {
@@ -300,6 +352,7 @@ export interface SalesOverview {
   purchase_types: string[];
   transactions_stored: number;
   last_tx_ts: number;
+  untagged_ads: number;
 }
 
 export interface Analysis {
@@ -352,4 +405,172 @@ export interface BotCheck {
   error: string;
   checks: { name: string; label: string; ok: boolean; message: string }[];
   stats?: Record<string, number>;
+}
+
+// ------------------------------------------------------------------ v2.1
+
+export type Capability = "yes" | "no" | "unknown";
+
+export interface Capabilities {
+  delete_ad: Capability;
+  edit_photo: Capability;
+  checked_ts: number;
+  source: string;
+}
+
+export type BulkKind = "content" | "referral" | "replace";
+export type BulkMode = "replace" | "inplace";
+
+export interface BulkRequest {
+  kind: BulkKind;
+  ad_ids: number[];
+  mode: BulkMode;
+  text?: string;
+  variant_id?: number;
+  per_ad?: Record<string, { text: string }>;
+  photo_id?: string;
+  photo_name?: string;
+  budget_source: "account" | "transfer";
+  initial_budget?: number;
+  topup_after_withdraw?: boolean;
+  group_by?: "target" | "cpm" | "placement";
+  proposal_ids?: number[];
+  confirm?: boolean;
+}
+
+export interface BulkPreviewItem {
+  ad_id: number;
+  label: string;
+  placement: string;
+  changes: { field: string; label: string; old: string; new: string }[];
+  money: { from_account: number; from_old: number; to_new: number };
+  warnings: string[];
+  blocked: string;
+}
+
+export interface BulkPreview {
+  kind: BulkKind;
+  mode: BulkMode;
+  retire: "delete" | "archive";
+  budget_source: "account" | "transfer";
+  move_old_budget: boolean;
+  photo_test: boolean;
+  items: BulkPreviewItem[];
+  assignments: { referrer_id: string; tag_id: number | null; label: string; ad_ids: number[] }[];
+  totals: {
+    ads: number;
+    blocked: number;
+    from_account: number;
+    from_old: number;
+    to_new: number;
+    account_balance: number;
+    daily_cap_left: number;
+  };
+  errors: string[];
+  warnings: string[];
+  capabilities: Capabilities;
+}
+
+export type BulkItemStatus =
+  | "pending"
+  | "submitted"
+  | "in_review"
+  | "approved"
+  | "declined"
+  | "retired"
+  | "failed"
+  | "skipped";
+
+export interface BulkItem {
+  id: number;
+  ad_id: number;
+  new_ad_id: number | null;
+  label: string;
+  status: BulkItemStatus;
+  status_label: string;
+  step: string;
+  error: string;
+  decline_reason: string;
+  withdrawn: number;
+  text: string | null;
+  promote_url: string | null;
+  old_status: string | null;
+  new_status: string | null;
+  updated_ts: number;
+}
+
+export interface BulkOperation {
+  id: number;
+  kind: BulkKind;
+  mode: BulkMode;
+  status: "running" | "stopped" | "done";
+  params: Record<string, unknown> & { has_photo?: boolean; text?: string | null; retire?: string; budget_source?: string };
+  total: number;
+  counts: Partial<Record<BulkItemStatus, number>>;
+  finished: number;
+  progress: number;
+  created_ts: number;
+  updated_ts: number;
+  finished_ts: number;
+  note: string;
+  items?: BulkItem[];
+}
+
+export interface PoolEntry {
+  referrer_id: string;
+  tag_id: number | null;
+  tag_name: string | null;
+  ads: number;
+  free: boolean;
+  check: { exists: boolean; invited: number | null; error: string; ts: number } | null;
+}
+
+export interface TrackingInfo {
+  mode: "pool" | "campaign";
+  modes: { key: string; label: string; available: boolean; description: string }[];
+  campaign_request: string;
+  campaign_example: string;
+  pool: PoolEntry[];
+}
+
+export interface TextIssue {
+  code: string;
+  severity: "error" | "warn";
+  message: string;
+}
+
+export interface TextCheck {
+  issues: TextIssue[];
+  likely_violation: boolean;
+  length: number;
+}
+
+export interface DiagRow {
+  name: string;
+  label: string;
+  method: string;
+  path: string;
+  action: string;
+  body: Record<string, unknown>;
+  http_status: number | null;
+  elapsed_ms: number;
+  msg: string;
+  excerpt: string;
+  rows: number | null;
+  fields: string[];
+  ok: boolean;
+  cause: { code: string; title: string; fix: string };
+  error: string;
+}
+
+export interface DiagReport {
+  ts: number;
+  version: string;
+  base_url: string;
+  username: string;
+  rows: DiagRow[];
+  identity: { count_user: number | null; reported_username: string; configured_username: string };
+  warnings: string[];
+  ok: number;
+  failed: number;
 }
