@@ -445,7 +445,7 @@ def test_every_page_fits_small_screens(browser, ctx, stack: Stack, shot, width, 
             if res["pageOverflow"] > 1 or res["bad"]:
                 problems.append(f"{width}px {path}: {res}")
             if width == 390:
-                shot(p, "m-" + (path.strip("/").replace("/", "-") or "overview"))
+                shot(p, "m-" + (re.sub(r"[^A-Za-z0-9_-]+", "-", path.strip("/")) or "overview"))
     finally:
         mctx.close()
     assert problems == []
