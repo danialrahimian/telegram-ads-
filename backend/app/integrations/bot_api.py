@@ -14,6 +14,7 @@ were actually found.
 import hashlib
 import json
 import re
+import time
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -32,12 +33,15 @@ TX_TIME_KEYS = ("created_at", "time", "date", "timestamp", "created", "time_sell
 
 
 class BotApiError(Exception):
-    def __init__(self, message: str, *, http_status: int | None = None, path: str = "", action: str = "") -> None:
+    def __init__(
+        self, message: str, *, http_status: int | None = None, path: str = "", action: str = "", kind: str = ""
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.http_status = http_status
         self.path = path
         self.action = action
+        self.kind = kind  # network failures: dns | tls | timeout | connect
 
     @property
     def forbidden(self) -> bool:
@@ -190,12 +194,58 @@ def field_names(rows: list[dict[str, Any]]) -> list[str]:
     return sorted({str(k) for r in rows[:20] for k in r})
 
 
+def network_kind(e: Exception) -> str:
+    """dns | tls | timeout | connect, from an httpx exception (and what caused it)."""
+    if isinstance(e, httpx.TimeoutException):
+        return "timeout"
+    text = f"{e!r} {e.__cause__!r} {e.__context__!r}".lower()
+    if any(x in text for x in ("ssl", "certificate", "tls")):
+        return "tls"
+    if any(
+        x in text
+        for x in (
+            "name or service not known",
+            "nodename nor servname",
+            "getaddrinfo",
+            "name resolution",
+            "no address associated",
+            "gaierror",
+        )
+    ):
+        return "dns"
+    return "connect"
+
+
+SECRET_KEYS_RE = re.compile(
+    r"(?i)\b(token|api[_-]?key|apikey|authorization|password|secret)\b(\s*[\"']?\s*[:=]\s*[\"']?)([^\s\"',;<>&]+)"
+)
+
+
+def scrub(value: Any, secrets: list[str] | tuple[str, ...] = ()) -> Any:
+    """Remove secrets from anything that may be shown, stored or logged: the given values and
+    anything that looks like `token: ...`, recursively through dicts and lists."""
+    if isinstance(value, dict):
+        return {k: ("***" if SECRET_KEYS_RE.fullmatch(f"{k}=x") else scrub(v, secrets)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub(v, secrets) for v in value]
+    if not isinstance(value, str):
+        return value
+    out = value
+    for sec in secrets:
+        if sec and len(sec) >= 4:
+            out = out.replace(sec, "***")
+    return SECRET_KEYS_RE.sub(lambda m: m.group(1) + m.group(2) + "***", out)
+
+
 class BotApiClient:
     def __init__(self, base_url: str, api_key: str, *, http: httpx.AsyncClient | None = None) -> None:
         self.base = normalize_base_url(base_url)
         self.api_key = api_key
         self._http = http
         self._own_http = http is None
+        # Every request, without the key: method, path, action, body, HTTP status, time, bot message,
+        # an excerpt of a non-JSON answer and the rows/fields found. Used by the connection diagnostics.
+        self.trace: list[dict[str, Any]] = []
 
     async def __aenter__(self) -> "BotApiClient":
         if self._http is None:
@@ -219,27 +269,74 @@ class BotApiClient:
             body["actions"] = actions
         url = f"{self.base}{path}"
         headers = {"Token": self.api_key, "Accept": "application/json"}
+        entry: dict[str, Any] = {
+            "method": method,
+            "path": path,
+            "action": actions or "",
+            "body": scrub(body, [self.api_key]),
+            "http_status": None,
+            "elapsed_ms": 0,
+            "msg": "",
+            "excerpt": "",
+            "content_type": "",
+            "redirected_to": "",
+            "rows": None,
+            "fields": [],
+            "error_kind": "",
+            "json": False,
+            "empty": False,
+            "envelope_ok": None,
+        }
+        self.trace.append(entry)
+        del self.trace[:-100]
+        started = time.monotonic()
         try:
             resp = await self.http.request(method, url, headers=headers, json=body)
         except httpx.HTTPError as e:
-            raise BotApiError(e.__class__.__name__, path=path, action=actions or "") from e
+            entry["elapsed_ms"] = round((time.monotonic() - started) * 1000)
+            entry["error_kind"] = network_kind(e)
+            entry["msg"] = scrub(e.__class__.__name__, [self.api_key])
+            raise BotApiError(e.__class__.__name__, path=path, action=actions or "", kind=entry["error_kind"]) from e
+        entry["elapsed_ms"] = round((time.monotonic() - started) * 1000)
+        entry["http_status"] = resp.status_code
+        entry["content_type"] = resp.headers.get("content-type", "")[:80]
+        if resp.history:
+            final = urlparse(str(resp.url))
+            entry["redirected_to"] = scrub(f"{final.netloc}{final.path}", [self.api_key])
+        entry["empty"] = not resp.content.strip()
         try:
             data = resp.json()
         except ValueError:
             # Server errors may come back as HTML/text; a short excerpt tells the bot developer what broke.
-            snippet = body_excerpt(resp.text)
-            msg = f"HTTP {resp.status_code}" + (f" — {snippet}" if snippet else "")
+            snippet = scrub(body_excerpt(resp.text, 300), [self.api_key])
+            entry["excerpt"] = snippet
+            msg = f"HTTP {resp.status_code}" + (f" — {snippet[:180]}" if snippet else "")
             raise BotApiError(msg, http_status=resp.status_code, path=path, action=actions or "") from None
+        entry["json"] = True
+        if isinstance(data, dict) and isinstance(data.get("msg"), str):
+            entry["msg"] = scrub(data["msg"][:300], [self.api_key])
         if resp.status_code >= 400:
             msg = str(data.get("msg") if isinstance(data, dict) else "") or f"HTTP {resp.status_code}"
-            raise BotApiError(msg, http_status=resp.status_code, path=path, action=actions or "")
+            raise BotApiError(scrub(msg, [self.api_key]), http_status=resp.status_code, path=path, action=actions or "")
         if isinstance(data, dict) and isinstance(data.get("status"), bool):  # the {status, msg, obj} envelope
+            entry["envelope_ok"] = data["status"]
             if data["status"] is False:
                 raise BotApiError(
-                    str(data.get("msg") or "error"), http_status=resp.status_code, path=path, action=actions or ""
+                    scrub(str(data.get("msg") or "error"), [self.api_key]),
+                    http_status=resp.status_code,
+                    path=path,
+                    action=actions or "",
                 )
-            return data.get("obj")
-        return data
+            obj = data.get("obj")
+        else:
+            obj = data
+        rows = extract_rows(obj)
+        entry["rows"] = len(rows)
+        entry["fields"] = (
+            field_names(rows)[:40] if rows else sorted(str(k) for k in obj)[:40] if isinstance(obj, dict) else []
+        )
+        entry["obj_type"] = type(obj).__name__
+        return obj
 
     async def statbot(self) -> dict[str, Any]:
         data = await self.request("GET", "/api/statbot")

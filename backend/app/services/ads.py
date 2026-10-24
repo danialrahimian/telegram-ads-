@@ -144,6 +144,8 @@ async def create(
         note=str(data.get("note") or "")[:500],
         created_by_app=True,
         synced_ts=now_ts(),
+        funded_since_ts=now_ts(),
+        empty_since_ts=0,
     )
     s.add(ad)
     events.log(

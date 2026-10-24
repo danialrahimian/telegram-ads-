@@ -10,7 +10,7 @@ from app.core.errors import AppError, NotFound
 from app.db.base import utcnow
 from app.integrations.anthropic import ClaudeClient, ClaudeError
 from app.models import Account, Ad, AiAnalysis, TextVariant
-from app.services import app_settings, events, metrics
+from app.services import app_settings, events, guidelines, metrics
 from app.services.accounts import settings_of
 
 
@@ -22,7 +22,7 @@ async def performance(s: AsyncSession, acc: Account) -> dict[int, dict[str, Any]
     """Totals of the ads that use each text: linked by variant_id, or with exactly the same text."""
     variants = list((await s.execute(select(TextVariant).where(TextVariant.account_id == acc.id))).scalars())
     by_text = {v.text.strip(): v.id for v in variants}
-    rows = await metrics.ad_rows(s, acc)
+    rows = await metrics.ad_rows(s, acc, archived=None)
     out: dict[int, dict[str, Any]] = {
         v.id: {"ads": 0, "views": 0, "clicks": 0, "starts": 0, "spent": 0.0, "buyers": 0, "running": 0}
         for v in variants
@@ -202,4 +202,53 @@ def public(v: TextVariant, perf: dict[str, Any] | None = None) -> dict[str, Any]
         "analysis": v.analysis,
         "analyzed_at": v.analyzed_at.isoformat() if v.analyzed_at else None,
         "performance": perf or {},
+    }
+
+
+COMPLIANT_SYSTEM = """تو کپی‌رایتر تبلیغات تلگرام هستی و متن‌ها را با قوانین تبلیغات تلگرام (ads.telegram.org/guidelines) منطبق می‌کنی.
+خروجی فقط یک شیء JSON باشد: {"text": "متن نهایی", "notes": ["چه چیزی عوض شد و چرا"]}.
+قواعد متن: فارسی روان؛ حداکثر ۱۶۰ کاراکتر با احتساب ایموجی؛ یک پاراگراف بدون خط جدید و بدون فهرست؛ حداکثر یک ایموجی؛
+بدون حروف یا علامت‌گذاری نمایشی (!!!، ★)؛ بدون فوریت ساختگی («تا آخر امشب»، «فقط امروز»، «آخرین فرصت»)؛ بدون ادعای گمراه‌کننده یا کلیک‌خور؛
+بدون عبارت مبهم و تکراری؛ بدون لینک در متن مگر همان لینک آگهی؛ بدون کوتاه‌کننده‌ی لینک؛ نام برند را حفظ کن؛ قیمت یا ادعای تازه نساز؛
+یک مزیت مشخص و یک دعوت ساده به اقدام بنویس."""
+
+
+async def rewrite_compliant(
+    s: AsyncSession, acc: Account, text: str, *, reason: str = "", ad_id: int | None = None
+) -> dict[str, Any]:
+    """Ask Claude for a version of `text` that follows Telegram's ad guidelines; the user edits it before use."""
+    ad = None
+    if ad_id:
+        ad = (await s.execute(select(Ad).where(Ad.account_id == acc.id, Ad.ad_id == ad_id))).scalar_one_or_none()
+    before = guidelines.check(text, promote_url=ad.promote_url if ad else None)
+    context = {
+        "brand": acc.name,
+        "bot": f"@{acc.bot_username}" if acc.bot_username else None,
+        "target_channel_or_bot": ad.target_label if ad else None,
+        "language": "فارسی",
+        "max_length": 160,
+        "current_text": text,
+        "telegram_decline_reason": reason or (ad.decline_reason if ad else "") or None,
+        "problems_found": [i["message"] for i in before["issues"]],
+    }
+    prompt = "بازنویسی منطبق با قوانین تبلیغات تلگرام برای این آگهی:\n\n" + json.dumps(
+        context, ensure_ascii=False, indent=1
+    )
+    key = await app_settings.claude_key(s)
+    model = await app_settings.get(s, "claude_model")
+    try:
+        result = await ClaudeClient(key, model).complete_json(COMPLIANT_SYSTEM, prompt, max_tokens=800)
+    except ClaudeError as e:
+        raise AppError(str(e), code="claude_error") from None
+    new = str(result.get("text") or "").strip().replace("\n", " ")
+    if not new:
+        raise AppError("Claude متنی برنگرداند؛ دوباره امتحان کنید.", code="claude_error")
+    after = guidelines.check(new, promote_url=ad.promote_url if ad else None)
+    events.log(s, "text_compliance_rewrite", account_id=acc.id, actor="user", ad_id=ad_id, detail=new[:160])
+    return {
+        "text": new,
+        "notes": [str(x) for x in result.get("notes") or []][:6],
+        "check": after,
+        "before": before,
+        "model": model,
     }

@@ -1,13 +1,13 @@
 from datetime import date
 
 from fastapi import APIRouter, File, Form, UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from app.api.deps import AccountDep, Auth, Session
 from app.core.errors import AppError, NotFound
-from app.models import Ad, AdStat, Job, Proposal
+from app.models import Ad, AdStat, BulkItem, Job, Proposal
 from app.schemas.requests import AdActionIn, AdCreateIn, AdEditIn
-from app.services import actions, ads, metrics
+from app.services import actions, ads, budget, metrics
 from app.services.rules import KIND_LABEL
 
 router = APIRouter(prefix="/accounts/{slug}/ads", tags=["ads"], dependencies=[Auth])
@@ -16,18 +16,27 @@ MAX_PHOTO = 5 * 1024 * 1024
 
 
 @router.get("")
-async def list_ads(acc: AccountDep, s: Session, since: str | None = None) -> dict:
+async def list_ads(acc: AccountDep, s: Session, since: str | None = None, archived: bool = False) -> dict:
     if since:
         try:
             since = date.fromisoformat(since).isoformat()
         except ValueError:
             since = None
-    return {"ads": await metrics.ad_rows(s, acc, since), "since": since}
+    archived_count = (
+        await s.execute(
+            select(func.count(Ad.id)).where(Ad.account_id == acc.id, Ad.archived.is_(True), Ad.gone.is_(False))
+        )
+    ).scalar_one()
+    return {
+        "ads": await metrics.ad_rows(s, acc, since, archived=archived),
+        "since": since,
+        "archived_count": archived_count,
+    }
 
 
 @router.get("/{ad_id}")
 async def get_ad(ad_id: int, acc: AccountDep, s: Session) -> dict:
-    row = next((r for r in await metrics.ad_rows(s, acc) if r["ad_id"] == ad_id), None)
+    row = next((r for r in await metrics.ad_rows(s, acc, archived=None) if r["ad_id"] == ad_id), None)
     if row is None:
         raise NotFound("این آگهی پیدا نشد.")
     target = (await s.execute(select(Ad.target).where(Ad.account_id == acc.id, Ad.ad_id == ad_id))).scalar_one()
@@ -61,6 +70,7 @@ async def get_ad(ad_id: int, acc: AccountDep, s: Session) -> dict:
             "kind": p.kind,
             "label": KIND_LABEL.get(p.kind, p.kind),
             "amount": p.amount,
+            "metrics": p.metrics,
             "status": p.status,
             "reason": p.reason,
             "result": p.result,
@@ -75,7 +85,26 @@ async def get_ad(ad_id: int, acc: AccountDep, s: Session) -> dict:
             )
         ).scalars()
     ]
-    return {"ad": row, "target": target, "daily": daily, "jobs": jobs, "proposals": props}
+    bulk_items = [
+        {"op_id": it.op_id, "item_id": it.id, "status": it.status, "new_ad_id": it.new_ad_id, "old_ad_id": it.ad_id}
+        for it in (
+            await s.execute(
+                select(BulkItem)
+                .where(BulkItem.account_id == acc.id, or_(BulkItem.ad_id == ad_id, BulkItem.new_ad_id == ad_id))
+                .order_by(BulkItem.id.desc())
+                .limit(10)
+            )
+        ).scalars()
+    ]
+    return {
+        "ad": row,
+        "target": target,
+        "daily": daily,
+        "jobs": jobs,
+        "proposals": props,
+        "budget_history": await budget.history(s, acc.id, ad_id),
+        "bulk": bulk_items,
+    }
 
 
 @router.post("/{ad_id}/actions")

@@ -2,7 +2,11 @@
 
     python -m tests.mocks.server --tg-port 8790 --bot-port 8791 --claude-port 8792
 
-Extra endpoint on the bot server for tests: POST /__test/add_user {"key": "a", "referrer": "9001"}.
+Extra endpoints for tests:
+  bot server  POST /__test/add_user {"key": "a", "referrer": "9001"}
+  Telegram    POST /__test/review {"key": "a", "ad_id": null, "decision": "approve"|"decline", "reason": ""}
+              POST /__test/set_ad {"key": "a", "ad_id": 11, "fields": {"remaining_budget": 1.0}}
+              POST /__test/set_balance {"key": "a", "amount": 5}
 """
 
 import argparse
@@ -33,6 +37,23 @@ def _parse_multipart(body: bytes, ctype: str) -> tuple[dict, dict]:
 def make_tg_handler(mock: TgAdsMock) -> type[BaseHTTPRequestHandler]:
     class H(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
+            if self.path.startswith("/__test/"):
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+                key = body.get("key", "a")
+                if self.path == "/__test/review":
+                    res: object = mock.review(
+                        key, body.get("ad_id"), body.get("decision", "approve"), body.get("reason", "")
+                    )
+                elif self.path == "/__test/set_ad":
+                    mock.set_ad(key, int(body["ad_id"]), **body.get("fields", {}))
+                    res = True
+                elif self.path == "/__test/set_balance":
+                    mock.set_balance(key, float(body["amount"]))
+                    res = True
+                else:
+                    res = False
+                self._send(200, {"ok": True, "result": res})
+                return
             auth = self.headers.get("Authorization", "")
             token = auth[7:] if auth.startswith("Bearer ") else ""
             length = self.headers.get("Content-Length")
@@ -122,6 +143,12 @@ def claude_reply(user: str) -> str:
             ],
         }
         return "```json\n" + json.dumps(data, ensure_ascii=False) + "\n```"
+    if "بازنویسی منطبق با قوانین" in user:
+        data = {
+            "text": "سایکونت | اینترنت پایدار و پرسرعت با تست رایگان؛ در ربات امتحان کنید 👇",
+            "notes": ["فوریت ساختگی و ایموجی اضافه حذف شد"],
+        }
+        return json.dumps(data, ensure_ascii=False)
     return "## تحلیل\n- آگهی‌های **کانال** ارزان‌ترند.\n- بودجه را به آگهی‌های خوب منتقل کنید.\n\n| آگهی | پیشنهاد |\n|---|---|\n| 1 | شارژ |\n\nOK"
 
 

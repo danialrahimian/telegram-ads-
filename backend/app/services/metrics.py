@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import now_ts
 from app.integrations.bot_api import zone
 from app.models import Account, AccountSnapshot, Ad, AdStat, BotTransaction, BotUser, ReferralTag
+from app.services import budget
 from app.services.accounts import settings_of
 
 RUNNING = ("active",)
@@ -85,8 +86,105 @@ async def tag_sales(s: AsyncSession, acc: Account, since_ts: int = 0) -> dict[in
     return dict(out)
 
 
-async def ad_rows(s: AsyncSession, acc: Account, since_day: str | None = None) -> list[dict[str, Any]]:
+LOOKBACK_DAYS = 120
+
+
+async def _daily_by_ad(
+    s: AsyncSession, account_id: int, since: str
+) -> dict[int, dict[str, tuple[int, int, int, float]]]:
+    out: dict[int, dict[str, tuple[int, int, int, float]]] = defaultdict(dict)
+    for ad_id, day, views, clicks, actions, spent in await s.execute(
+        select(AdStat.ad_id, AdStat.day, AdStat.views, AdStat.clicks, AdStat.actions, AdStat.spent).where(
+            AdStat.account_id == account_id, AdStat.day >= since
+        )
+    ):
+        out[int(ad_id)][str(day)] = (int(views or 0), int(clicks or 0), int(actions or 0), float(spent or 0))
+    return out
+
+
+def _funded_metrics(
+    a: Ad,
+    daily: dict[str, tuple[int, int, int, float]],
+    events: list[tuple[int, str, float]],
+    day_views: dict[str, int],
+    st: dict[str, Any],
+    today: date,
+    now: int,
+) -> dict[str, Any]:
+    """Numbers measured on funded days only: the last 28 days with budget, the current funded stretch,
+    days without budget and the current run of days without a single view."""
+    spend_days = sorted(d for d, v in daily.items() if v[3] > 0)
+    funded = budget.funded_days(
+        events,
+        remaining=a.remaining_budget,
+        created_ts=a.created_date,
+        spend_days=spend_days,
+        today=today,
+        lookback=LOOKBACK_DAYS,
+    )
+    last28 = sorted(funded, reverse=True)[:28]
+    agg = [0, 0, 0, 0.0]
+    for d in last28:
+        v = daily.get(d)
+        if v:
+            for i in range(4):
+                agg[i] += v[i]
+    out: dict[str, Any] = {
+        "funded_days_28": len(last28),
+        "views_f28": agg[0],
+        "clicks_f28": agg[1],
+        "starts_f28": agg[2],
+        "spent_f28": agg[3],
+        "cps_f28": _ratio(agg[3], agg[2]),
+        "funded_since_ts": a.funded_since_ts,
+        "empty_since_ts": a.empty_since_ts,
+        "empty_days": None,
+        "window_days": 0.0,
+        "spent_window": 0.0,
+        "zero_view_days": 0,
+        "others_views_in_streak": 0,
+    }
+    if budget.has_budget(a.remaining_budget):
+        start = max(now - 28 * 86400, a.funded_since_ts or a.created_date or now)
+        out["window_days"] = round(max(0, now - start) / 86400, 2)
+        first = datetime.fromtimestamp(start, UTC).date().isoformat()
+        out["spent_window"] = sum(v[3] for d, v in daily.items() if d >= first)
+    else:
+        since = (
+            datetime.fromtimestamp(a.empty_since_ts, UTC).date()
+            if a.empty_since_ts
+            else (date.fromisoformat(spend_days[-1]) if spend_days else None)
+        )
+        out["empty_days"] = (today - since).days if since else None
+    # Run of whole days (yesterday backwards) with budget and no views at all.
+    streak, others = 0, 0
+    cur = today - timedelta(days=1)
+    for _ in range(int(st.get("replace_zero_view_days") or 5) + 30):
+        key = cur.isoformat()
+        own = daily.get(key, (0, 0, 0, 0.0))[0]
+        if own or key not in funded:
+            break
+        streak += 1
+        others += day_views.get(key, 0)
+        cur -= timedelta(days=1)
+    out["zero_view_days"], out["others_views_in_streak"] = streak, others
+    return out
+
+
+async def ad_rows(
+    s: AsyncSession, acc: Account, since_day: str | None = None, *, archived: bool | None = False
+) -> list[dict[str, Any]]:
+    """One row per ad. archived=False hides ads retired by a replacement, True shows only them, None all."""
     t = today_utc()
+    now = now_ts()
+    st = settings_of(acc)
+    lookback = (t - timedelta(days=LOOKBACK_DAYS - 1)).isoformat()
+    daily_all = await _daily_by_ad(s, acc.id, lookback)
+    events = await budget.events_by_ad(s, acc.id, now - LOOKBACK_DAYS * 86400)
+    day_views: dict[str, int] = defaultdict(int)
+    for per_day in daily_all.values():
+        for d, v in per_day.items():
+            day_views[d] += v[0]
     d7 = (t - timedelta(days=6)).isoformat()
     d28 = (t - timedelta(days=27)).isoformat()
     w7, w28 = await _window(s, acc.id, d7), await _window(s, acc.id, d28)
@@ -101,7 +199,15 @@ async def ad_rows(s: AsyncSession, acc: Account, since_day: str | None = None) -
     }
     ads = list(
         (
-            await s.execute(select(Ad).where(Ad.account_id == acc.id, Ad.gone.is_(False)).order_by(Ad.ad_id.desc()))
+            await s.execute(
+                select(Ad)
+                .where(
+                    Ad.account_id == acc.id,
+                    Ad.gone.is_(False),
+                    *(() if archived is None else (Ad.archived.is_(archived),)),
+                )
+                .order_by(Ad.ad_id.desc())
+            )
         ).scalars()
     )
     tags = {
@@ -163,6 +269,12 @@ async def ad_rows(s: AsyncSession, acc: Account, since_day: str | None = None) -
             r[f"spent_{key}"], r[f"starts_{key}"] = x["spent"], x["starts"]
             r[f"clicks_{key}"], r[f"views_{key}"] = x["clicks"], x["views"]
             r[f"cps_{key}"] = _ratio(x["spent"], x["starts"])
+        own = daily_all.get(a.ad_id, {})
+        own_views = {d: v[0] for d, v in own.items()}
+        others = {d: n - own_views.get(d, 0) for d, n in day_views.items()}
+        r.update(_funded_metrics(a, own, events.get(a.ad_id, []), others, st, t, now))
+        r["archived"] = a.archived
+        r["created_by_app"] = a.created_by_app
         out.append(r)
     return out
 
@@ -309,7 +421,7 @@ async def summary(s: AsyncSession, acc: Account) -> dict[str, Any]:
                 func.sum(case((Ad.status.in_(("in_review", "ready_for_review")), 1), else_=0)),
                 func.sum(case((Ad.status == "declined", 1), else_=0)),
                 func.count(Ad.id),
-            ).where(Ad.account_id == acc.id, Ad.gone.is_(False))
+            ).where(Ad.account_id == acc.id, Ad.gone.is_(False), Ad.archived.is_(False))
         )
     ).one()
     out["counts"] = {
@@ -323,6 +435,7 @@ async def summary(s: AsyncSession, acc: Account) -> dict[str, Any]:
             select(func.sum(Ad.remaining_budget)).where(
                 Ad.account_id == acc.id,
                 Ad.gone.is_(False),
+                Ad.archived.is_(False),
                 Ad.status == "active",
                 Ad.is_paused.is_(False),
                 Ad.remaining_budget > 0,
@@ -474,7 +587,7 @@ async def tag_rows(s: AsyncSession, acc: Account) -> list[dict[str, Any]]:
         (
             await s.execute(
                 select(Ad.tag_id, Ad.ad_id, Ad.spent_budget, Ad.actions, Ad.title, Ad.status).where(
-                    Ad.account_id == acc.id, Ad.gone.is_(False), Ad.tag_id.is_not(None)
+                    Ad.account_id == acc.id, Ad.gone.is_(False), Ad.archived.is_(False), Ad.tag_id.is_not(None)
                 )
             )
         ).all()
@@ -524,7 +637,19 @@ async def sales_overview(s: AsyncSession, acc: Account, days: int = 30) -> dict[
     total_tx = (
         await s.execute(select(func.count(BotTransaction.id)).where(BotTransaction.account_id == acc.id))
     ).scalar_one()
+    untagged = (
+        await s.execute(
+            select(func.count(Ad.id)).where(
+                Ad.account_id == acc.id,
+                Ad.gone.is_(False),
+                Ad.archived.is_(False),
+                Ad.tag_id.is_(None),
+                Ad.status.notin_(("declined", "stopped")),
+            )
+        )
+    ).scalar_one()
     return {
+        "untagged_ads": int(untagged),
         "days": days,
         "by_type": by_type,
         "purchase_types": st.get("purchase_types"),

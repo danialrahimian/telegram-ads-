@@ -46,6 +46,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "topup_daily_cap": 5.0,
     "fatigue_age_days": 21,
     "fatigue_ratio": 1.5,
+    "refill_max_empty_days": 45,  # a good ad without budget for longer than this is not proposed for a refill
+    "replace_zero_view_days": 5,  # days with budget and no views (while other ads are shown) -> replacement
+    # Bulk operations: how many ads go to Telegram per batch, how often, and how many may wait in review.
+    "bulk_batch_size": 5,
+    "bulk_batch_interval_seconds": 120,
+    "bulk_max_in_review": 10,
+    "bulk_min_budget": 0.1,  # initial budget of a replacement funded later from the old ad
     # New ads
     "default_cpm_channel": 0.45,
     "default_cpm_bot": 0.5,
@@ -54,6 +61,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "bot_timezone": "Asia/Tehran",
     "purchase_types": ["buy", "buy_extend"],
     "toman_per_unit": 0,  # price of 1 TON/EUR/Star in Toman, for return on ad spend; 0 = not set
+    # Per-ad sales tracking: "pool" = referrer accounts owned by the advertiser (works with the bot today);
+    # "campaign" = random start codes, needs bot support that does not exist yet.
+    "tracking_mode": "pool",
+    "referrer_pool": [],
 }
 
 INTERVAL_KEYS = {"sync_fast_seconds": 10, "sync_stats_seconds": 120, "sync_bot_seconds": 30}
@@ -89,6 +100,25 @@ def validate_settings_patch(patch: dict[str, Any]) -> dict[str, Any]:
             out[k] = [x.strip()[:40] for x in v][:20]
         elif k == "bot_timezone":
             out[k] = str(v)[:64]
+        elif k == "referrer_pool":
+            if not isinstance(v, list):
+                raise AppError("فهرست معرف‌ها باید آرایه‌ای از شناسه‌های عددی باشد.")
+            ids: list[str] = []
+            for x in v:
+                x = str(x).strip()
+                if not x:
+                    continue
+                if not x.isdigit() or not 3 <= len(x) <= 20:
+                    raise AppError(f"«{x}» شناسه‌ی عددی تلگرام نیست.")
+                if x not in ids:
+                    ids.append(x)
+            out[k] = ids[:500]
+        elif k == "tracking_mode":
+            if v not in ("pool", "campaign"):
+                raise AppError("حالت ردیابی نامعتبر است.")
+            if v == "campaign":
+                raise AppError("حالت «کد کمپین» به پشتیبانی ربات نیاز دارد و هنوز قابل فعال‌سازی نیست.")
+            out[k] = v
     return out
 
 
@@ -377,7 +407,8 @@ def public(acc: Account) -> dict[str, Any]:
             "fields": acc.bot_fields or {},
         },
         "settings": st,
-        "sync": acc.sync_state or {},
+        "sync": {k: v for k, v in (acc.sync_state or {}).items() if k in ("fast", "stats", "bot")},
+        "bot_diag_ts": ((acc.sync_state or {}).get("bot_diag") or {}).get("ts", 0),
         "automation_paused": acc.automation_paused,
     }
 

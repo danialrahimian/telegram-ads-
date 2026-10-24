@@ -85,6 +85,10 @@ def http_mocks(tg_mock: TgAdsMock, bot_mock: BotMock) -> AsyncIterator[respx.Moc
             return httpx.Response(401, json={"error": {"message": "invalid x-api-key"}})
         body = json.loads(request.content)
         user = body["messages"][0]["content"]
+        if "بازنویسی منطبق با قوانین" in user:
+            from tests.mocks.server import claude_reply
+
+            return httpx.Response(200, json={"content": [{"type": "text", "text": claude_reply(user)}]})
         if "سه بازنویسی" in user:
             text = json.dumps(
                 {
